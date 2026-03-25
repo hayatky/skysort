@@ -1,0 +1,13 @@
+{
+  "name": "skysort",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @skysort/web dev",
+    "build:web": "pnpm --filter @skysort/web build",
+    "test:web": "pnpm --filter @skysort/web test",
+    "lint:web": "pnpm --filter @skysort/web lint",
+    "typecheck:web": "pnpm --filter @skysort/web typecheck"
+  }
+}

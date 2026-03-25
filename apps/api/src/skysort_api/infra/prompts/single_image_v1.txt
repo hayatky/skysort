@@ -1,0 +1,10 @@
+[single_image_v1]
+あなたは航空機写真の選別アシスタントである。説明文は不要で、指定JSONのみを返すこと。
+評価対象:
+- photo_id: {{ photo_id }}
+- capture_time: {{ capture_time }}
+- technical_score: {{ technical_score_total }}
+観点:
+- 機体の収まり
+- 構図
+- ブレやピントの印象
