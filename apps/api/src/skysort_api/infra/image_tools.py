@@ -9,6 +9,7 @@ import imagehash
 import numpy as np
 from PIL import Image, ImageCms, ImageOps
 
+from .file_scan import build_source_signature
 from .settings import get_settings
 
 try:
@@ -21,29 +22,29 @@ RAW_EXTENSIONS = {".arw"}
 
 
 def load_image(path: Path) -> Image.Image:
-    suffix = path.suffix.lower()
-    if suffix in RAW_EXTENSIONS:
-        if rawpy is None:
-            raise RuntimeError("rawpy is required for ARW processing")
-        with rawpy.imread(str(path)) as raw:
-            frame = raw.postprocess(use_camera_wb=True, no_auto_bright=False, output_bps=8)
-        image = Image.fromarray(frame)
-    else:
-        image = Image.open(path)
+    image = _load_render_image(path)
     image = ImageOps.exif_transpose(image)
     if image.mode not in {"RGB", "L"}:
         image = image.convert("RGB")
     return _convert_to_srgb(image)
 
 
-def ensure_preview_assets(path: Path, photo_id: str) -> tuple[Path, Path]:
+def build_asset_cache_key(path: Path | str, file_hash: str, file_size: int, file_mtime: float) -> str:
+    return build_source_signature(path, file_hash, file_size, file_mtime)
+
+
+def asset_paths_for_signature(source_signature: str) -> tuple[Path, Path]:
     settings = get_settings()
     thumbs_dir = settings.cache_dir / "thumbs"
     previews_dir = settings.cache_dir / "previews"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     previews_dir.mkdir(parents=True, exist_ok=True)
-    thumb_path = thumbs_dir / f"{photo_id}.jpg"
-    preview_path = previews_dir / f"{photo_id}.jpg"
+    return thumbs_dir / f"{source_signature}.jpg", previews_dir / f"{source_signature}.jpg"
+
+
+def ensure_preview_assets(path: Path, source_signature: str) -> tuple[Path, Path]:
+    settings = get_settings()
+    thumb_path, preview_path = asset_paths_for_signature(source_signature)
 
     if thumb_path.exists() and preview_path.exists():
         return thumb_path, preview_path
@@ -71,9 +72,8 @@ def _save_resized(image: Image.Image, output_path: Path, max_side: int, quality:
 
 
 def extract_image_metadata(path: Path) -> dict[str, object]:
-    image = load_image(path)
-    width, height = image.size
-    exif = image.getexif()
+    image, exif = _load_metadata_source(path)
+    width, height = ImageOps.exif_transpose(image).size
     capture_time = exif.get(36867) or exif.get(306)
     subsec = exif.get(37521) or exif.get(9291)
     capture_dt = _parse_capture_time(capture_time, subsec)
@@ -172,3 +172,64 @@ def _fraction_to_string(value: object) -> str | None:
             return f"1/{denominator}"
         return f"{value.numerator}/{denominator}"
     return str(value)
+
+
+def _load_render_image(path: Path) -> Image.Image:
+    if path.suffix.lower() not in RAW_EXTENSIONS:
+        return _open_image(path)
+    preview_image, _ = _load_raw_preview(path)
+    if preview_image is not None:
+        return preview_image
+    return _load_raw_postprocessed_image(path)
+
+
+def _load_metadata_source(path: Path) -> tuple[Image.Image, Image.Exif]:
+    if path.suffix.lower() not in RAW_EXTENSIONS:
+        image = _open_image(path)
+        return image, image.getexif()
+
+    preview_image, preview_bytes = _load_raw_preview(path)
+    if preview_image is not None:
+        if preview_bytes is not None:
+            with Image.open(io.BytesIO(preview_bytes)) as source:
+                exif = source.getexif()
+            return preview_image, exif
+        return preview_image, preview_image.getexif()
+
+    rendered = _load_raw_postprocessed_image(path)
+    return rendered, Image.Exif()
+
+
+def _load_raw_preview(path: Path) -> tuple[Image.Image | None, bytes | None]:
+    if rawpy is None:
+        raise RuntimeError("rawpy is required for ARW processing")
+    with rawpy.imread(str(path)) as raw:
+        try:
+            thumbnail = raw.extract_thumb()
+        except Exception:
+            return None, None
+        if thumbnail.format == rawpy.ThumbFormat.JPEG:
+            return _open_image_from_bytes(thumbnail.data), bytes(thumbnail.data)
+        if thumbnail.format == rawpy.ThumbFormat.BITMAP:
+            return Image.fromarray(thumbnail.data), None
+    return None, None
+
+
+def _load_raw_postprocessed_image(path: Path) -> Image.Image:
+    if rawpy is None:
+        raise RuntimeError("rawpy is required for ARW processing")
+    with rawpy.imread(str(path)) as raw:
+        frame = raw.postprocess(use_camera_wb=True, no_auto_bright=False, output_bps=8)
+    return Image.fromarray(frame)
+
+
+def _open_image(path: Path) -> Image.Image:
+    with Image.open(path) as image:
+        image.load()
+        return image.copy()
+
+
+def _open_image_from_bytes(payload: bytes) -> Image.Image:
+    with Image.open(io.BytesIO(payload)) as image:
+        image.load()
+        return image.copy()

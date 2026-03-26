@@ -49,6 +49,8 @@ Important runtime behavior:
 - application logs live in `var/logs/app.log`
 - AI health is checked before `POST /api/jobs/{job_id}/analyze`
 - XMP export defaults to `dry_run=true`
+- unchanged files reuse deterministic preview/thumbnail cache keys derived from path + hash + size + mtime
+- ARW preview generation prefers the embedded JPEG preview and falls back to `rawpy` demosaic only when needed
 
 ## Frontend Setup
 
@@ -108,9 +110,20 @@ Backend syntax / basic unit checks:
 cd /Users/yuta/Git/skysort
 uv run python -m compileall -q apps/api/src
 uv run --project apps/api pytest
+pnpm --filter @skysort/web test
 ```
 
-The repository currently includes unit tests for the rating and grouping logic. Frontend package scripts are wired, but require dependency installation first.
+The repository includes backend tests for import diffing, RAW preview selection, API validation, grouping order, and XMP helpers, plus frontend Vitest coverage for the main Phase 1 routes.
+
+## Benchmark Validation
+
+Before production use, validate against a benchmark burst set with expected best/reject examples.
+
+1. Prepare 10 to 20 representative burst groups containing obvious best cuts, obvious reject frames, and at least one burst larger than 6 images.
+2. Run a fresh import and analysis with the target LM Studio model and keep `dry_run=true` for XMP export.
+3. Compare group best picks against the benchmark expectation list and review every expected reject frame in the global review screen.
+4. Record mismatches with the group ID, expected outcome, actual outcome, and whether the issue came from grouping, technical scoring, or AI ranking.
+5. Re-run one unchanged benchmark folder and confirm that previews and unchanged evaluations are reused instead of being recomputed.
 
 ## Current Constraints
 
@@ -120,6 +133,8 @@ The repository currently includes unit tests for the rating and grouping logic. 
 - AI responses retry JSON recovery up to two times and then settle as `ai_eval_failed` instead of fabricating fallback scores.
 - ExifTool is required for actual write-back. Without it, export remains in preview mode.
 - PNG is display-only in Phase 1 and excluded from XMP write-back.
+- ARW metadata is sourced from the embedded preview when available; tags not present there remain `null` rather than blocking the job.
+- Settings changes that affect scoring are snapshotted per job, so a full re-run with new thresholds creates a new analysis job instead of mutating old results.
 
 ## XMP Safety Policy
 
@@ -132,4 +147,4 @@ The repository currently includes unit tests for the rating and grouping logic. 
 ## Notes For Further Work
 
 - Phase 2 targets group merge/split, stronger filtering/search, improved retry behavior, and performance tuning.
-- Before production use, validate the scoring pipeline against a benchmark burst set with expected best and reject examples.
+- For acceptance-style validation, keep a reusable benchmark set with expected best and reject examples under versioned review notes.

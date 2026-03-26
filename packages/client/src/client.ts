@@ -291,6 +291,19 @@ export class SkySortApiClient {
 
   getSettings() {
     return this.request<Record<string, unknown>>("/settings").then((raw) => ({
+      weights: {
+        technical_quality: Number((raw.weights as Record<string, unknown> | undefined)?.technical_quality ?? 0.35),
+        composition: Number((raw.weights as Record<string, unknown> | undefined)?.composition ?? 0.35),
+        subject_state: Number((raw.weights as Record<string, unknown> | undefined)?.subject_state ?? 0.2),
+        rarity: Number((raw.weights as Record<string, unknown> | undefined)?.rarity ?? 0.1),
+      },
+      rating_thresholds: {
+        star_5: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_5 ?? 83),
+        star_4: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_4 ?? 78),
+        star_3: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_3 ?? 64),
+        star_2: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_2 ?? 48),
+        reject: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.reject ?? 20),
+      },
       ai_base_url: String(raw.ai_base_url ?? ""),
       ai_model_name: String(raw.ai_model_name ?? ""),
       ai_concurrency: Number(raw.ai_concurrency ?? 1),
@@ -304,6 +317,8 @@ export class SkySortApiClient {
       compare_preview_size: Number(raw.compare_preview_size ?? 512),
       preview_jpeg_quality: Number(raw.preview_jpeg_quality ?? raw.jpeg_quality ?? 90),
       jpeg_quality: Number(raw.jpeg_quality ?? raw.preview_jpeg_quality ?? 90),
+      highlight_threshold: Number(raw.highlight_threshold ?? 252),
+      shadow_threshold: Number(raw.shadow_threshold ?? 3),
       exiftool_path: String(raw.exiftool_path ?? "exiftool"),
       cache_dir: String(raw.cache_dir ?? ""),
     }));
@@ -314,6 +329,19 @@ export class SkySortApiClient {
       method: "PATCH",
       body: JSON.stringify(payload),
     }).then((raw) => ({
+      weights: {
+        technical_quality: Number((raw.weights as Record<string, unknown> | undefined)?.technical_quality ?? 0.35),
+        composition: Number((raw.weights as Record<string, unknown> | undefined)?.composition ?? 0.35),
+        subject_state: Number((raw.weights as Record<string, unknown> | undefined)?.subject_state ?? 0.2),
+        rarity: Number((raw.weights as Record<string, unknown> | undefined)?.rarity ?? 0.1),
+      },
+      rating_thresholds: {
+        star_5: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_5 ?? 83),
+        star_4: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_4 ?? 78),
+        star_3: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_3 ?? 64),
+        star_2: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_2 ?? 48),
+        reject: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.reject ?? 20),
+      },
       ai_base_url: String(raw.ai_base_url ?? ""),
       ai_model_name: String(raw.ai_model_name ?? ""),
       ai_concurrency: Number(raw.ai_concurrency ?? 1),
@@ -327,6 +355,8 @@ export class SkySortApiClient {
       compare_preview_size: Number(raw.compare_preview_size ?? 512),
       preview_jpeg_quality: Number(raw.preview_jpeg_quality ?? raw.jpeg_quality ?? 90),
       jpeg_quality: Number(raw.jpeg_quality ?? raw.preview_jpeg_quality ?? 90),
+      highlight_threshold: Number(raw.highlight_threshold ?? 252),
+      shadow_threshold: Number(raw.shadow_threshold ?? 3),
       exiftool_path: String(raw.exiftool_path ?? "exiftool"),
       cache_dir: String(raw.cache_dir ?? ""),
     }));

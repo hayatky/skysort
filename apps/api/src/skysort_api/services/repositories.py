@@ -22,6 +22,14 @@ class JobRepository:
         stmt = select(Job).where(Job.root_path == root_path).order_by(Job.started_at.desc().nullslast(), Job.id.desc())
         return self.session.scalars(stmt).first()
 
+    def previous_for_root_path(self, root_path: str, current_job_id: str) -> Job | None:
+        stmt = (
+            select(Job)
+            .where(Job.root_path == root_path, Job.id != current_job_id)
+            .order_by(Job.started_at.desc().nullslast(), Job.id.desc())
+        )
+        return self.session.scalars(stmt).first()
+
     def list_groups(self, job_id: str) -> list[Group]:
         return list(self.session.scalars(select(Group).where(Group.job_id == job_id).order_by(Group.created_at)))
 
@@ -59,6 +67,9 @@ class GroupRepository:
 
     def get(self, group_id: str) -> Group | None:
         return self.session.get(Group, group_id)
+
+    def list_by_job(self, job_id: str) -> list[Group]:
+        return list(self.session.scalars(select(Group).where(Group.job_id == job_id).order_by(Group.created_at)))
 
     def list_members(self, group_id: str) -> list[GroupMember]:
         return list(self.session.scalars(select(GroupMember).where(GroupMember.group_id == group_id).order_by(GroupMember.sort_order)))
@@ -128,6 +139,12 @@ class EvaluationRepository:
             .order_by(TechnicalScore.updated_at.desc())
         )
         return self.session.scalars(stmt).first()
+
+    def list_technical_for_job(self, job_id: str) -> list[TechnicalScore]:
+        return list(self.session.scalars(select(TechnicalScore).where(TechnicalScore.job_id == job_id)))
+
+    def list_ai_responses_for_job(self, job_id: str) -> list[AIResponse]:
+        return list(self.session.scalars(select(AIResponse).where(AIResponse.job_id == job_id)))
 
     def record_history(self, history: RatingHistory) -> None:
         self.session.add(history)

@@ -45,6 +45,15 @@ def init_db() -> None:
     get_engine()
 
 
+def reset_engine() -> None:
+    global _engine, _SessionLocal, SessionLocal
+    if _engine is not None:
+        _engine.dispose()
+    _engine = None
+    _SessionLocal = None
+    SessionLocal = None
+
+
 @contextmanager
 def session_scope() -> Iterator[Session]:
     global _SessionLocal

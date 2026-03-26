@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from skysort_api.domain.evaluation import (
     SemanticMetrics,
@@ -16,6 +17,7 @@ from skysort_api.domain.evaluation import (
 )
 from skysort_api.domain.grouping import PhotoCandidate, should_start_new_group
 from skysort_api.infra.ai_client import VisionLanguageModelClient
+from skysort_api.infra.file_scan import build_source_signature
 from skysort_api.infra.image_tools import (
     build_data_url,
     compute_similarity_seed,
@@ -32,8 +34,26 @@ from .repositories import EvaluationRepository, FailureRepository, GroupReposito
 logger = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class PreviousGroupState:
+    group: Group
+    members: list[GroupMember]
+    paths: frozenset[str]
+
+
+@dataclass(slots=True)
+class PreviousAnalysisContext:
+    job: Job
+    evaluation_settings_match: bool
+    photos_by_path: dict[str, Photo]
+    photos_by_id: dict[str, Photo]
+    evaluations_by_photo_id: dict[str, PhotoEvaluation]
+    technical_by_photo_id: dict[str, TechnicalScore]
+    groups_by_path_set: dict[frozenset[str], PreviousGroupState]
+    ai_responses_by_group_id: dict[str, list[AIResponse]]
+
+
 def run_analysis(session, job_id: str) -> None:
-    settings = get_settings()
     job_repo = JobRepository(session)
     photo_repo = PhotoRepository(session)
     group_repo = GroupRepository(session)
@@ -45,6 +65,9 @@ def run_analysis(session, job_id: str) -> None:
     if job is None:
         raise ValueError(f"Job not found: {job_id}")
 
+    previous_job = job_repo.previous_for_root_path(job.root_path, job.id)
+    previous_context = _load_previous_context(session, job, previous_job) if previous_job is not None else None
+
     health = ai_client.health_check()
     if not _health_ready(health):
         _fail_job(session, job, failure_repo, "ai_health_failed", health.error_detail or "AI health check failed")
@@ -55,11 +78,13 @@ def run_analysis(session, job_id: str) -> None:
     job.current_stage = "preview_exif"
     session.commit()
 
+    reuse_cache = _reuse_cache_enabled(job)
     photos = photo_repo.list_by_job(job_id)
     candidate_records: list[tuple[Photo, PhotoCandidate]] = []
     for photo in photos:
         try:
-            _prepare_photo(photo)
+            previous_photo = previous_context.photos_by_path.get(photo.file_path) if previous_context else None
+            _prepare_photo(photo, previous_photo=previous_photo, reuse_cache=reuse_cache)
             candidate_records.append(
                 (
                     photo,
@@ -78,18 +103,23 @@ def run_analysis(session, job_id: str) -> None:
             job.imported_files = len(candidate_records)
             session.commit()
 
+    ordered_candidate_records = _sort_candidate_records(candidate_records)
+    ordered_photos = [photo for photo, _ in ordered_candidate_records]
+
     job.current_stage = "grouped"
-    groups, members = _group_candidates(job_id, candidate_records)
+    groups, members = _group_candidates(job_id, ordered_candidate_records)
     group_repo.replace_for_job(job_id, groups, members)
-    job.grouped_files = len(candidate_records)
+    members_by_group_id = _group_members_by_group(members)
+    job.grouped_files = len(ordered_candidate_records)
     session.commit()
 
     job.current_stage = "technically_scored"
-    for photo in photos:
+    for photo in ordered_photos:
         if photo.is_missing:
             continue
         try:
-            _score_photo(session, eval_repo, photo, job.id)
+            if not _reuse_technical_score(eval_repo, previous_context, photo, job.id):
+                _score_photo(session, eval_repo, photo, job.id)
         except Exception as exc:
             logger.exception("Technical scoring failed for %s", photo.file_path)
             _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True)
@@ -100,8 +130,18 @@ def run_analysis(session, job_id: str) -> None:
     job.current_stage = "semantically_scored"
     for group in groups:
         try:
-            member_ids = [member.photo_id for member in sorted((item for item in members if item.group_id == group.id), key=lambda item: item.sort_order)]
-            _evaluate_group(session, eval_repo, photo_repo, failure_repo, job, group, member_ids, ai_client)
+            member_ids = [member.photo_id for member in members_by_group_id[group.id]]
+            reused = _reuse_group_results(
+                session,
+                eval_repo,
+                photo_repo,
+                previous_context,
+                job,
+                group,
+                members_by_group_id[group.id],
+            )
+            if not reused:
+                _evaluate_group(session, eval_repo, photo_repo, failure_repo, job, group, member_ids, ai_client)
         except Exception as exc:
             logger.exception("Group AI evaluation failed for %s", group.id)
             _record_failure(session, job, failure_repo, "semantically_scored", str(exc), group=group, retryable=True)
@@ -149,11 +189,17 @@ def reanalyze_photos(session, job_id: str, photo_ids: list[str], scope: str) -> 
     session.commit()
 
 
-def _prepare_photo(photo: Photo) -> None:
-    thumb_path, preview_path = ensure_preview_assets(path=Path(photo.file_path), photo_id=photo.id)
-    metadata = extract_image_metadata(Path(photo.file_path))
+def _prepare_photo(photo: Photo, *, previous_photo: Photo | None, reuse_cache: bool) -> None:
+    source_signature = _source_signature_for_photo(photo)
+    thumb_path, preview_path = ensure_preview_assets(path=Path(photo.file_path), source_signature=source_signature)
     photo.thumb_path = str(thumb_path)
     photo.preview_path = str(preview_path)
+
+    if reuse_cache and previous_photo is not None and _same_source_signature(photo, previous_photo) and _has_cached_metadata(photo):
+        photo.updated_at = datetime.now(timezone.utc)
+        return
+
+    metadata = extract_image_metadata(Path(photo.file_path))
     photo.width = metadata["width"]
     photo.height = metadata["height"]
     photo.orientation = metadata["orientation"]
@@ -166,6 +212,17 @@ def _prepare_photo(photo: Photo) -> None:
     photo.iso = metadata["iso"]
     photo.shutter_speed = metadata["shutter_speed"]
     photo.updated_at = datetime.now(timezone.utc)
+
+
+def _sort_candidate_records(candidate_records: list[tuple[Photo, PhotoCandidate]]) -> list[tuple[Photo, PhotoCandidate]]:
+    return sorted(
+        candidate_records,
+        key=lambda item: (
+            item[1].capture_timestamp_ms if item[1].capture_timestamp_ms is not None else float("inf"),
+            item[0].capture_order_index,
+            item[0].file_path,
+        ),
+    )
 
 
 def _group_candidates(job_id: str, candidate_records: list[tuple[Photo, PhotoCandidate]]) -> tuple[list[Group], list[GroupMember]]:
@@ -263,7 +320,7 @@ def _evaluate_group(
     compare_pool = candidate_pool[: max(settings.candidate_limit * 2, 6)]
     best_photo_id = _choose_best_photo(eval_repo, photo_repo, group.id, compare_pool or ordered_ids[:1], ai_client)
 
-    overridden_best = next((item.photo_id for item in current_evaluations.values() if item.user_override_flag and item.best_cut_flag), None)
+    overridden_best = next((item.photo_id for item in current_evaluations.values() if item and item.user_override_flag and item.best_cut_flag), None)
     chosen_best = overridden_best or best_photo_id or (ordered_ids[0] if ordered_ids else None)
     group.best_photo_id = chosen_best
     group.representative_photo_id = ordered_ids[0] if ordered_ids else group.representative_photo_id
@@ -638,3 +695,285 @@ def _threshold_map() -> dict[str, float]:
         "star_4": thresholds.star_4,
         "star_5": thresholds.star_5,
     }
+
+
+def _reuse_cache_enabled(job: Job) -> bool:
+    snapshot = json.loads(job.settings_snapshot_json)
+    return bool(snapshot.get("reuse_cache", True))
+
+
+def _load_previous_context(session, job: Job, previous_job: Job) -> PreviousAnalysisContext:
+    photo_repo = PhotoRepository(session)
+    eval_repo = EvaluationRepository(session)
+    group_repo = GroupRepository(session)
+    previous_photos = photo_repo.list_by_job(previous_job.id, include_missing=True)
+    previous_photos_by_path = {photo.file_path: photo for photo in previous_photos}
+    previous_photos_by_id = {photo.id: photo for photo in previous_photos}
+    previous_evaluations = {evaluation.photo_id: evaluation for evaluation in eval_repo.list_current_for_job(previous_job.id)}
+    previous_technical = {score.photo_id: score for score in eval_repo.list_technical_for_job(previous_job.id)}
+    previous_groups_by_path_set: dict[frozenset[str], PreviousGroupState] = {}
+    for group in group_repo.list_by_job(previous_job.id):
+        members = group_repo.list_members(group.id)
+        paths = frozenset(
+            previous_photos_by_id[member.photo_id].file_path
+            for member in members
+            if member.photo_id in previous_photos_by_id and not previous_photos_by_id[member.photo_id].is_missing
+        )
+        if paths:
+            previous_groups_by_path_set[paths] = PreviousGroupState(group=group, members=members, paths=paths)
+    ai_responses_by_group_id: dict[str, list[AIResponse]] = {}
+    for response in eval_repo.list_ai_responses_for_job(previous_job.id):
+        if response.group_id is None:
+            continue
+        ai_responses_by_group_id.setdefault(response.group_id, []).append(response)
+    return PreviousAnalysisContext(
+        job=previous_job,
+        evaluation_settings_match=_evaluation_settings_match(job, previous_job),
+        photos_by_path=previous_photos_by_path,
+        photos_by_id=previous_photos_by_id,
+        evaluations_by_photo_id=previous_evaluations,
+        technical_by_photo_id=previous_technical,
+        groups_by_path_set=previous_groups_by_path_set,
+        ai_responses_by_group_id=ai_responses_by_group_id,
+    )
+
+
+def _reuse_technical_score(
+    eval_repo: EvaluationRepository,
+    previous_context: PreviousAnalysisContext | None,
+    photo: Photo,
+    job_id: str,
+) -> bool:
+    if previous_context is None or not previous_context.evaluation_settings_match:
+        return False
+    previous_photo = previous_context.photos_by_path.get(photo.file_path)
+    if previous_photo is None or not _same_source_signature(photo, previous_photo):
+        return False
+    previous_technical = previous_context.technical_by_photo_id.get(previous_photo.id)
+    if previous_technical is None:
+        return False
+
+    eval_repo.add_technical(
+        TechnicalScore(
+            id=f"tech_{uuid.uuid4().hex[:10]}",
+            photo_id=photo.id,
+            job_id=job_id,
+            sharpness_score=previous_technical.sharpness_score,
+            motion_blur_score=previous_technical.motion_blur_score,
+            highlight_clip_ratio=previous_technical.highlight_clip_ratio,
+            shadow_clip_ratio=previous_technical.shadow_clip_ratio,
+            technical_score_total=previous_technical.technical_score_total,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+
+    previous_evaluation = previous_context.evaluations_by_photo_id.get(previous_photo.id)
+    provisional_rating, provisional_selection = provisional_rating_from_technical(previous_technical.technical_score_total, _threshold_map())
+    if previous_evaluation is not None:
+        provisional_rating = previous_evaluation.provisional_rating if previous_evaluation.provisional_rating is not None else provisional_rating
+        provisional_selection = previous_evaluation.provisional_selection_status or provisional_selection
+
+    preserved_rating = provisional_rating
+    preserved_selection = provisional_selection
+    pick_flag = False
+    best_cut_flag = False
+    reviewed_flag = False
+    user_override_flag = False
+    if previous_evaluation is not None and previous_evaluation.user_override_flag:
+        preserved_rating = previous_evaluation.rating
+        preserved_selection = previous_evaluation.selection_status
+        pick_flag = previous_evaluation.pick_flag
+        best_cut_flag = previous_evaluation.best_cut_flag
+        reviewed_flag = previous_evaluation.reviewed_flag
+        user_override_flag = True
+
+    evaluation = _build_evaluation(
+        photo_id=photo.id,
+        job_id=job_id,
+        group_id=None,
+        current=None,
+        semantic=SemanticMetrics(),
+        rating=preserved_rating,
+        selection_status=preserved_selection,
+        evaluation_status="provisional",
+        provisional_rating=provisional_rating,
+        provisional_selection_status=provisional_selection,
+        best_cut_flag=best_cut_flag,
+        pick_flag=pick_flag,
+        reviewed_flag=reviewed_flag,
+    )
+    evaluation.user_override_flag = user_override_flag
+    eval_repo.add_evaluation(evaluation)
+    _record_history(eval_repo, None, photo.id, job_id, provisional_rating, provisional_selection, "technical_reuse")
+    return True
+
+
+def _reuse_group_results(
+    session,
+    eval_repo: EvaluationRepository,
+    photo_repo: PhotoRepository,
+    previous_context: PreviousAnalysisContext | None,
+    job: Job,
+    group: Group,
+    members: list[GroupMember],
+) -> bool:
+    if previous_context is None or not previous_context.evaluation_settings_match:
+        return False
+
+    current_photos = [photo_repo.get(member.photo_id) for member in members]
+    if any(photo is None for photo in current_photos):
+        return False
+    resolved_photos = [photo for photo in current_photos if photo is not None]
+    current_paths = frozenset(photo.file_path for photo in resolved_photos)
+    previous_group_state = previous_context.groups_by_path_set.get(current_paths)
+    if previous_group_state is None or len(previous_group_state.members) != len(members):
+        return False
+
+    old_to_new_photo_ids: dict[str, str] = {}
+    for photo in resolved_photos:
+        previous_photo = previous_context.photos_by_path.get(photo.file_path)
+        if previous_photo is None or not _same_source_signature(photo, previous_photo):
+            return False
+        previous_evaluation = previous_context.evaluations_by_photo_id.get(previous_photo.id)
+        if previous_evaluation is None:
+            return False
+        old_to_new_photo_ids[previous_photo.id] = photo.id
+
+    for photo in resolved_photos:
+        previous_photo = previous_context.photos_by_path[photo.file_path]
+        previous_evaluation = previous_context.evaluations_by_photo_id[previous_photo.id]
+        cloned = _clone_group_evaluation(previous_evaluation, photo.id, job.id, group.id)
+        eval_repo.add_evaluation(cloned)
+        _record_history(eval_repo, None, photo.id, job.id, cloned.rating, cloned.selection_status, "analysis_reuse")
+
+    previous_best_photo_id = previous_group_state.group.best_photo_id
+    previous_representative_photo_id = previous_group_state.group.representative_photo_id
+    group.best_photo_id = old_to_new_photo_ids.get(previous_best_photo_id) if previous_best_photo_id else None
+    group.representative_photo_id = old_to_new_photo_ids.get(previous_representative_photo_id) if previous_representative_photo_id else group.representative_photo_id
+    group.stale_flag = False
+    group.stale_reason = None
+    group.updated_at = datetime.now(timezone.utc)
+
+    for response in previous_context.ai_responses_by_group_id.get(previous_group_state.group.id, []):
+        eval_repo.add_ai_response(_clone_ai_response(response, job.id, group.id, old_to_new_photo_ids))
+
+    session.flush()
+    return True
+
+
+def _group_members_by_group(members: list[GroupMember]) -> dict[str, list[GroupMember]]:
+    grouped: dict[str, list[GroupMember]] = {}
+    for member in members:
+        grouped.setdefault(member.group_id, []).append(member)
+    for group_id in grouped:
+        grouped[group_id] = sorted(grouped[group_id], key=lambda item: item.sort_order)
+    return grouped
+
+
+def _same_source_signature(current: Photo, previous: Photo) -> bool:
+    return _source_signature_for_photo(current) == _source_signature_for_photo(previous)
+
+
+def _source_signature_for_photo(photo: Photo) -> str:
+    return build_source_signature(photo.file_path, photo.file_hash, photo.file_size, photo.file_mtime)
+
+
+def _has_cached_metadata(photo: Photo) -> bool:
+    return photo.width is not None and photo.height is not None
+
+
+def _evaluation_settings_match(current_job: Job, previous_job: Job) -> bool:
+    current_snapshot = dict(json.loads(current_job.settings_snapshot_json))
+    previous_snapshot = dict(json.loads(previous_job.settings_snapshot_json))
+    current_snapshot.pop("reuse_cache", None)
+    previous_snapshot.pop("reuse_cache", None)
+    return current_snapshot == previous_snapshot
+
+
+def _clone_group_evaluation(previous: PhotoEvaluation, photo_id: str, job_id: str, group_id: str) -> PhotoEvaluation:
+    return PhotoEvaluation(
+        id=f"eval_{uuid.uuid4().hex[:10]}",
+        photo_id=photo_id,
+        job_id=job_id,
+        group_id=group_id,
+        semantic_score=previous.semantic_score,
+        composition_score=previous.composition_score,
+        subject_state_score=previous.subject_state_score,
+        rarity_score=previous.rarity_score,
+        provisional_rating=previous.provisional_rating,
+        provisional_selection_status=previous.provisional_selection_status,
+        rating=previous.rating,
+        selection_status=previous.selection_status,
+        evaluation_status=previous.evaluation_status,
+        pick_flag=previous.pick_flag,
+        best_cut_flag=previous.best_cut_flag,
+        reviewed_flag=previous.reviewed_flag,
+        ai_reason=previous.ai_reason,
+        user_override_flag=previous.user_override_flag,
+        stale_flag=False,
+        stale_reason=None,
+        version=1,
+        is_current=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+
+def _clone_ai_response(previous: AIResponse, job_id: str, group_id: str, old_to_new_photo_ids: dict[str, str]) -> AIResponse:
+    translated_response_json = _translate_marshaled_json(previous.response_json, old_to_new_photo_ids)
+    translated_payload = _translate_marshaled_json(previous.request_payload, old_to_new_photo_ids)
+    translated_targets = _translate_marshaled_json(previous.target_photo_ids_json, old_to_new_photo_ids)
+    return AIResponse(
+        id=f"ai_{uuid.uuid4().hex[:10]}",
+        job_id=job_id,
+        photo_id=old_to_new_photo_ids.get(previous.photo_id) if previous.photo_id else None,
+        group_id=group_id,
+        phase=previous.phase,
+        model_name=previous.model_name,
+        prompt_template_name=previous.prompt_template_name,
+        prompt_template_hash=previous.prompt_template_hash,
+        response_schema_version=previous.response_schema_version,
+        request_payload=translated_payload or previous.request_payload,
+        response_json=translated_response_json,
+        raw_response_text=_translate_raw_text(previous.raw_response_text, old_to_new_photo_ids),
+        raw_response_path=previous.raw_response_path,
+        target_photo_ids_json=translated_targets or previous.target_photo_ids_json,
+        response_status=previous.response_status,
+        latency_ms=previous.latency_ms,
+        requested_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+    )
+
+
+def _translate_marshaled_json(payload: str | None, old_to_new_photo_ids: dict[str, str]) -> str | None:
+    if not payload:
+        return payload
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return payload
+    translated = _translate_payload(parsed, old_to_new_photo_ids)
+    return json.dumps(translated, ensure_ascii=False)
+
+
+def _translate_payload(value: Any, old_to_new_photo_ids: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {key: _translate_payload(item, old_to_new_photo_ids) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_translate_payload(item, old_to_new_photo_ids) for item in value]
+    if isinstance(value, str):
+        translated = value
+        for old_photo_id, new_photo_id in old_to_new_photo_ids.items():
+            translated = translated.replace(old_photo_id, new_photo_id)
+        return translated
+    return value
+
+
+def _translate_raw_text(raw_text: str | None, old_to_new_photo_ids: dict[str, str]) -> str | None:
+    if raw_text is None:
+        return None
+    translated = raw_text
+    for old_photo_id, new_photo_id in old_to_new_photo_ids.items():
+        translated = translated.replace(old_photo_id, new_photo_id)
+    return translated

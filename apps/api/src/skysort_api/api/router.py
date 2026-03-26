@@ -54,7 +54,7 @@ def import_folder(payload: ImportRequest, session: Session = Depends(get_session
         normalize_root_path(payload.root_path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    job_id, count = create_import_job(session, payload.root_path, payload.recursive, payload.file_types)
+    job_id, count = create_import_job(session, payload.root_path, payload.recursive, payload.file_types, payload.reuse_cache)
     return ImportResponse(job_id=job_id, registered_count=count)
 
 
@@ -370,14 +370,22 @@ def get_settings_route() -> SettingsResponse:
         preview_size=settings.preview_size,
         compare_preview_size=settings.compare_preview_size,
         preview_jpeg_quality=settings.preview_jpeg_quality,
+        highlight_threshold=settings.highlight_threshold,
+        shadow_threshold=settings.shadow_threshold,
         exiftool_path=settings.exiftool_path,
         cache_dir=str(settings.cache_dir),
+        weights=SettingsResponse.WeightSettingsPayload(**settings.weights.model_dump()),
+        rating_thresholds=SettingsResponse.RatingThresholdsPayload(**settings.rating_thresholds.model_dump()),
     )
 
 
 @router.patch("/settings", response_model=SettingsResponse)
 def patch_settings_route(payload: SettingsUpdateRequest) -> SettingsResponse:
-    updates = {key: value for key, value in payload.model_dump(exclude_none=True).items() if key in UI_MUTABLE_FIELDS}
+    updates = {}
+    for key, value in payload.model_dump(exclude_none=True).items():
+        if key not in UI_MUTABLE_FIELDS:
+            continue
+        updates[key] = value
     if updates:
         persist_settings(updates)
     return get_settings_route()

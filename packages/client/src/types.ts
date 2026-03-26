@@ -193,6 +193,19 @@ export interface XmpExportResponse {
 }
 
 export interface SettingsResponse {
+  weights: {
+    technical_quality: number;
+    composition: number;
+    subject_state: number;
+    rarity: number;
+  };
+  rating_thresholds: {
+    star_5: number;
+    star_4: number;
+    star_3: number;
+    star_2: number;
+    reject: number;
+  };
   ai_base_url: string;
   ai_model_name: string;
   ai_concurrency: number;
@@ -206,6 +219,8 @@ export interface SettingsResponse {
   compare_preview_size: number;
   preview_jpeg_quality: number;
   jpeg_quality?: number;
+  highlight_threshold: number;
+  shadow_threshold: number;
   exiftool_path: string;
   cache_dir: string;
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -36,3 +37,9 @@ def compute_fast_hash(path: Path) -> str:
 def file_metadata(path: Path) -> tuple[int, float]:
     stat = path.stat()
     return stat.st_size, stat.st_mtime
+
+
+def build_source_signature(path: Path | str, file_hash: str, file_size: int, file_mtime: float) -> str:
+    normalized = str(Path(path).expanduser().resolve())
+    payload = f"{normalized}|{file_hash}|{file_size}|{int(file_mtime * 1000)}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

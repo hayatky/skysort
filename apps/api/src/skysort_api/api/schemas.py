@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ImportRequest(BaseModel):
@@ -52,12 +52,20 @@ class AIHealthResponse(BaseModel):
 
 
 class PhotoMutationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     job_id: str
-    rating: int | None = None
-    selection_status: str | None = None
+    rating: int | None = Field(default=None, ge=1, le=5)
+    selection_status: Literal["normal", "rejected"] | None = None
     pick_flag: bool | None = None
     best_cut_flag: bool | None = None
     reviewed_flag: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_rejected_without_rating(self) -> "PhotoMutationRequest":
+        if self.selection_status == "rejected" and self.rating is not None:
+            raise ValueError("rejected photos cannot include a rating")
+        return self
 
 
 class BatchMutationRequest(BaseModel):
@@ -91,6 +99,19 @@ class ExportResultsRequest(BaseModel):
 
 
 class SettingsResponse(BaseModel):
+    class WeightSettingsPayload(BaseModel):
+        technical_quality: float
+        composition: float
+        subject_state: float
+        rarity: float
+
+    class RatingThresholdsPayload(BaseModel):
+        star_5: float
+        star_4: float
+        star_3: float
+        star_2: float
+        reject: float
+
     ai_base_url: str
     ai_model_name: str
     ai_concurrency: int
@@ -102,11 +123,28 @@ class SettingsResponse(BaseModel):
     preview_size: int
     compare_preview_size: int
     preview_jpeg_quality: int
+    highlight_threshold: int
+    shadow_threshold: int
     exiftool_path: str
     cache_dir: str
+    weights: WeightSettingsPayload
+    rating_thresholds: RatingThresholdsPayload
 
 
 class SettingsUpdateRequest(BaseModel):
+    class WeightSettingsUpdatePayload(BaseModel):
+        technical_quality: float | None = None
+        composition: float | None = None
+        subject_state: float | None = None
+        rarity: float | None = None
+
+    class RatingThresholdsUpdatePayload(BaseModel):
+        star_5: float | None = None
+        star_4: float | None = None
+        star_3: float | None = None
+        star_2: float | None = None
+        reject: float | None = None
+
     ai_base_url: str | None = None
     ai_model_name: str | None = None
     ai_concurrency: int | None = None
@@ -118,4 +156,8 @@ class SettingsUpdateRequest(BaseModel):
     preview_size: int | None = None
     compare_preview_size: int | None = None
     preview_jpeg_quality: int | None = None
+    highlight_threshold: int | None = None
+    shadow_threshold: int | None = None
     exiftool_path: str | None = None
+    weights: WeightSettingsUpdatePayload | None = None
+    rating_thresholds: RatingThresholdsUpdatePayload | None = None

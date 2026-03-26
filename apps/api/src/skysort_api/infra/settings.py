@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -94,26 +95,37 @@ UI_MUTABLE_FIELDS = {
     "preview_size",
     "compare_preview_size",
     "preview_jpeg_quality",
+    "highlight_threshold",
+    "shadow_threshold",
     "exiftool_path",
+    "weights",
+    "rating_thresholds",
 }
 
 
 def ensure_runtime_dirs() -> None:
-    for path in (VAR_ROOT, DATA_ROOT, CACHE_ROOT, LOG_ROOT, TMP_ROOT):
+    for path in _runtime_directories():
         path.mkdir(parents=True, exist_ok=True)
 
 
 def load_persisted_settings() -> dict[str, Any]:
     ensure_runtime_dirs()
-    if not SETTINGS_FILE.exists():
+    settings_file = _settings_file_path()
+    if not settings_file.exists():
         return {}
-    return json.loads(SETTINGS_FILE.read_text())
+    return json.loads(settings_file.read_text())
 
 
 def persist_settings(update: dict[str, Any]) -> None:
     current = load_persisted_settings()
-    current.update(update)
-    SETTINGS_FILE.write_text(json.dumps(current, indent=2, sort_keys=True))
+    for key, value in update.items():
+        if isinstance(value, dict) and isinstance(current.get(key), dict):
+            merged = dict(current[key])
+            merged.update(value)
+            current[key] = merged
+        else:
+            current[key] = value
+    _settings_file_path().write_text(json.dumps(current, indent=2, sort_keys=True))
     get_runtime_settings.cache_clear()
 
 
@@ -126,3 +138,20 @@ def get_runtime_settings() -> RuntimeSettings:
 
 def get_settings() -> RuntimeSettings:
     return get_runtime_settings()
+
+
+def _runtime_directories() -> tuple[Path, Path, Path, Path, Path]:
+    data_dir = _env_or_default("SKYSORT_DATA_DIR", DATA_ROOT)
+    cache_dir = _env_or_default("SKYSORT_CACHE_DIR", CACHE_ROOT)
+    log_dir = _env_or_default("SKYSORT_LOG_DIR", LOG_ROOT)
+    tmp_dir = _env_or_default("SKYSORT_TMP_DIR", TMP_ROOT)
+    return VAR_ROOT, data_dir, cache_dir, log_dir, tmp_dir
+
+
+def _settings_file_path() -> Path:
+    return _env_or_default("SKYSORT_DATA_DIR", DATA_ROOT) / "settings.json"
+
+
+def _env_or_default(key: str, default: Path) -> Path:
+    value = os.getenv(key)
+    return Path(value) if value else default
