@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -18,8 +19,11 @@ TINY_IMAGE_DATA_URL = (
 
 @dataclass(slots=True)
 class AIHealthResult:
+    provider: str
     reachable: bool
     localhost_only: bool
+    remote_allowed: bool
+    auth_configured: bool
     available_models: list[str]
     configured_model: str
     configured_model_exists: bool
@@ -47,10 +51,14 @@ class VisionLanguageModelClient:
     def health_check(self) -> AIHealthResult:
         checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         localhost_only = _is_localhost_url(self.settings.ai_base_url)
-        if self.settings.localhost_only and not localhost_only:
+        auth_configured = self._auth_configured()
+        if not localhost_only and not self.settings.allow_remote_ai:
             return AIHealthResult(
+                provider=self.settings.ai_provider,
                 reachable=False,
                 localhost_only=False,
+                remote_allowed=False,
+                auth_configured=auth_configured,
                 available_models=[],
                 configured_model=self.settings.ai_model_name,
                 configured_model_exists=False,
@@ -58,10 +66,30 @@ class VisionLanguageModelClient:
                 vision_capable=False,
                 structured_json_capable=False,
                 checked_at=checked_at,
-                error_detail="AI base URL must be localhost-only",
+                error_detail="Remote AI endpoints require allow_remote_ai=true",
+            )
+        if not auth_configured:
+            return AIHealthResult(
+                provider=self.settings.ai_provider,
+                reachable=False,
+                localhost_only=localhost_only,
+                remote_allowed=self.settings.allow_remote_ai,
+                auth_configured=False,
+                available_models=[],
+                configured_model=self.settings.ai_model_name,
+                configured_model_exists=False,
+                model_loadable=False,
+                vision_capable=False,
+                structured_json_capable=False,
+                checked_at=checked_at,
+                error_detail="OpenRouter requires SKYSORT_AI_API_KEY",
             )
         try:
-            with httpx.Client(base_url=self.settings.ai_base_url, timeout=self.settings.ai_timeout_seconds) as client:
+            with httpx.Client(
+                base_url=self.settings.ai_base_url,
+                timeout=self.settings.ai_timeout_seconds,
+                headers=self._headers(),
+            ) as client:
                 models_response = client.get("/models")
                 models_response.raise_for_status()
                 models = [item.get("id", "") for item in models_response.json().get("data", [])]
@@ -86,8 +114,11 @@ class VisionLanguageModelClient:
                 parsed = _recover_json(content)
                 json_capable = bool(parsed and parsed.get("ok") is True)
             return AIHealthResult(
+                provider=self.settings.ai_provider,
                 reachable=True,
                 localhost_only=localhost_only,
+                remote_allowed=self.settings.allow_remote_ai,
+                auth_configured=auth_configured,
                 available_models=models,
                 configured_model=self.settings.ai_model_name,
                 configured_model_exists=configured_exists,
@@ -99,8 +130,11 @@ class VisionLanguageModelClient:
             )
         except Exception as exc:
             return AIHealthResult(
+                provider=self.settings.ai_provider,
                 reachable=False,
                 localhost_only=localhost_only,
+                remote_allowed=self.settings.allow_remote_ai,
+                auth_configured=auth_configured,
                 available_models=[],
                 configured_model=self.settings.ai_model_name,
                 configured_model_exists=False,
@@ -117,7 +151,7 @@ class VisionLanguageModelClient:
         parsed: dict[str, object] | None = None
         raw_text = ""
         retry_count = 0
-        with httpx.Client(base_url=self.settings.ai_base_url, timeout=30.0) as client:
+        with httpx.Client(base_url=self.settings.ai_base_url, timeout=30.0, headers=self._headers()) as client:
             while retry_count <= 2:
                 response = client.post("/chat/completions", json=payload)
                 response.raise_for_status()
@@ -132,6 +166,21 @@ class VisionLanguageModelClient:
                 status = "ai_eval_failed"
         latency_ms = int((time.perf_counter() - start) * 1000)
         return AIResult(phase=phase, payload=payload, parsed_json=parsed, raw_response_text=raw_text, status=status, latency_ms=latency_ms)
+
+    def _auth_configured(self) -> bool:
+        if self.settings.ai_provider == "openrouter":
+            return bool(self.settings.ai_api_key)
+        return True
+
+    def _headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if self.settings.ai_provider == "openrouter":
+            headers["Authorization"] = f"Bearer {self.settings.ai_api_key}"
+            if self.settings.ai_referer:
+                headers["HTTP-Referer"] = self.settings.ai_referer
+            if self.settings.ai_title:
+                headers["X-Title"] = self.settings.ai_title
+        return headers
 
 
 def _recover_json(raw_text: str) -> dict[str, object] | None:

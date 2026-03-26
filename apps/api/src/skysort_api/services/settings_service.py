@@ -7,8 +7,10 @@ from skysort_api.infra.settings import UI_MUTABLE_FIELDS, get_settings, persist_
 def get_settings_response() -> SettingsResponse:
     settings = get_settings()
     return SettingsResponse(
+        ai_provider=settings.ai_provider,
         ai_base_url=settings.ai_base_url,
         ai_model_name=settings.ai_model_name,
+        allow_remote_ai=settings.allow_remote_ai,
         ai_concurrency=settings.ai_concurrency,
         image_processing_concurrency=settings.image_processing_concurrency,
         similarity_threshold=settings.similarity_threshold,

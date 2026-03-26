@@ -96,8 +96,11 @@ export class SkySortApiClient {
 
   getAIHealth() {
     return this.request<Record<string, unknown>>("/ai/health").then((raw) => ({
+      provider: (raw.provider as AIHealthStatus["provider"] | undefined) ?? "lm_studio",
       reachable: Boolean(raw.reachable),
       localhost_only: Boolean(raw.localhost_only ?? true),
+      remote_allowed: Boolean(raw.remote_allowed ?? false),
+      auth_configured: Boolean(raw.auth_configured ?? true),
       available_models: Array.isArray(raw.available_models) ? (raw.available_models as string[]) : [],
       configured_model: String(raw.configured_model ?? ""),
       configured_model_exists: Boolean(raw.configured_model_exists ?? raw.model_available ?? false),
@@ -304,8 +307,10 @@ export class SkySortApiClient {
         star_2: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_2 ?? 48),
         reject: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.reject ?? 20),
       },
+      ai_provider: (raw.ai_provider as SettingsResponse["ai_provider"] | undefined) ?? "lm_studio",
       ai_base_url: String(raw.ai_base_url ?? ""),
       ai_model_name: String(raw.ai_model_name ?? ""),
+      allow_remote_ai: Boolean(raw.allow_remote_ai ?? false),
       ai_concurrency: Number(raw.ai_concurrency ?? 1),
       image_processing_concurrency: Number(raw.image_processing_concurrency ?? raw.image_concurrency ?? 2),
       image_concurrency: Number(raw.image_concurrency ?? raw.image_processing_concurrency ?? 2),
@@ -342,8 +347,10 @@ export class SkySortApiClient {
         star_2: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.star_2 ?? 48),
         reject: Number((raw.rating_thresholds as Record<string, unknown> | undefined)?.reject ?? 20),
       },
+      ai_provider: (raw.ai_provider as SettingsResponse["ai_provider"] | undefined) ?? "lm_studio",
       ai_base_url: String(raw.ai_base_url ?? ""),
       ai_model_name: String(raw.ai_model_name ?? ""),
+      allow_remote_ai: Boolean(raw.allow_remote_ai ?? false),
       ai_concurrency: Number(raw.ai_concurrency ?? 1),
       image_processing_concurrency: Number(raw.image_processing_concurrency ?? raw.image_concurrency ?? 2),
       image_concurrency: Number(raw.image_concurrency ?? raw.image_processing_concurrency ?? 2),

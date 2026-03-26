@@ -11,7 +11,7 @@ import { ReviewRoute } from "@/routes/review-route";
 import { SettingsRoute } from "@/routes/settings-route";
 
 const mocks = vi.hoisted(() => ({
-  aiHealth: { data: { reachable: true, configured_model: "qwen", configured_model_exists: true, vision_capable: true, structured_json_capable: true } },
+  aiHealth: { data: { provider: "lm_studio", reachable: true, localhost_only: true, remote_allowed: false, auth_configured: true, configured_model: "qwen", configured_model_exists: true, vision_capable: true, structured_json_capable: true } },
   importJob: { isPending: false, error: null, mutateAsync: vi.fn() },
   progress: { data: { current_stage: "semantically_scored", status: "running", failed_files: 1, total_files: 10, imported_files: 10, grouped_files: 8, technically_scored_files: 7, semantically_scored_files: 3, provisional_rated_files: 5, final_rated_files: 2 } },
   failures: { data: { items: [{ stage: "preview_exif", reason: "broken metadata" }] } },
@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   reanalyzeGroup: { mutate: vi.fn() },
   xmpExport: { mutate: vi.fn(), data: { target_count: 1, writable_count: 1, blocked_count: 0, write_candidates: [{ photo_id: "photo_1", summary: "preview diff" }] } },
   resultsExport: { mutate: vi.fn(), data: { export_path: "/tmp/export.csv" } },
-  settings: { data: { ai_base_url: "http://127.0.0.1:1234/v1", ai_model_name: "qwen", ai_concurrency: 1, image_processing_concurrency: 2, similarity_threshold: 0.86, time_proximity_seconds: 4, candidate_limit: 6, thumbnail_size: 512, preview_size: 1024, compare_preview_size: 512, preview_jpeg_quality: 90, highlight_threshold: 252, shadow_threshold: 3, exiftool_path: "exiftool", cache_dir: "/tmp/cache", weights: { technical_quality: 0.35, composition: 0.35, subject_state: 0.2, rarity: 0.1 }, rating_thresholds: { star_5: 83, star_4: 78, star_3: 64, star_2: 48, reject: 20 } } },
+  settings: { data: { ai_provider: "openrouter", ai_base_url: "https://openrouter.ai/api/v1", ai_model_name: "google/gemini-2.5-flash-lite", allow_remote_ai: true, ai_concurrency: 1, image_processing_concurrency: 2, similarity_threshold: 0.86, time_proximity_seconds: 4, candidate_limit: 6, thumbnail_size: 512, preview_size: 1024, compare_preview_size: 512, preview_jpeg_quality: 90, highlight_threshold: 252, shadow_threshold: 3, exiftool_path: "exiftool", cache_dir: "/tmp/cache", weights: { technical_quality: 0.35, composition: 0.35, subject_state: 0.2, rarity: 0.1 }, rating_thresholds: { star_5: 83, star_4: 78, star_3: 64, star_2: 48, reject: 20 } } },
   updateSettings: { mutate: vi.fn() },
 }));
 
@@ -162,6 +162,7 @@ describe("route rendering", () => {
 
     expect(markup).toContain("weights.technical_quality");
     expect(markup).toContain("rating_thresholds.reject");
-    expect(markup).toContain("highlight_threshold");
+    expect(markup).toContain("allow_remote_ai");
+    expect(markup).toContain("SKYSORT_AI_API_KEY");
   });
 });

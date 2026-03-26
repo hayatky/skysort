@@ -39,8 +39,11 @@ class JobProgressResponse(BaseModel):
 
 
 class AIHealthResponse(BaseModel):
+    provider: Literal["lm_studio", "openrouter"]
     reachable: bool
     localhost_only: bool
+    remote_allowed: bool
+    auth_configured: bool
     available_models: list[str]
     configured_model: str
     configured_model_exists: bool
@@ -112,8 +115,10 @@ class SettingsResponse(BaseModel):
         star_2: float
         reject: float
 
+    ai_provider: Literal["lm_studio", "openrouter"]
     ai_base_url: str
     ai_model_name: str
+    allow_remote_ai: bool
     ai_concurrency: int
     image_processing_concurrency: int
     similarity_threshold: float
@@ -145,8 +150,10 @@ class SettingsUpdateRequest(BaseModel):
         star_2: float | None = None
         reject: float | None = None
 
+    ai_provider: Literal["lm_studio", "openrouter"] | None = None
     ai_base_url: str | None = None
     ai_model_name: str | None = None
+    allow_remote_ai: bool | None = None
     ai_concurrency: int | None = None
     image_processing_concurrency: int | None = None
     similarity_threshold: float | None = None

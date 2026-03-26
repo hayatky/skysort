@@ -4,7 +4,7 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,8 +40,13 @@ class RuntimeSettings(BaseSettings):
     app_name: str = "SkySort API"
     app_version: str = "0.1.0"
     database_url: str = f"sqlite:///{(DATA_ROOT / 'skysort.db').as_posix()}"
+    ai_provider: Literal["lm_studio", "openrouter"] = "lm_studio"
     ai_base_url: str = "http://127.0.0.1:1234/v1"
     ai_model_name: str = "qwen2.5-vl-7b-instruct"
+    ai_api_key: str | None = None
+    ai_referer: str | None = None
+    ai_title: str | None = None
+    allow_remote_ai: bool = False
     ai_timeout_seconds: float = 10.0
     ai_concurrency: int = 1
     image_processing_concurrency: int = 2
@@ -62,7 +67,6 @@ class RuntimeSettings(BaseSettings):
     exiftool_path: str = "exiftool"
     prompt_template_dir: Path = APP_ROOT / "src" / "skysort_api" / "infra" / "prompts"
     response_schema_version: str = "v1"
-    localhost_only: bool = True
     sqlite_busy_timeout_seconds: float = 30.0
     cache_limit_mb: int = 8192
     log_retention_days: int = 30
@@ -84,8 +88,10 @@ AppSettings = RuntimeSettings
 Settings = RuntimeSettings
 
 UI_MUTABLE_FIELDS = {
+    "ai_provider",
     "ai_base_url",
     "ai_model_name",
+    "allow_remote_ai",
     "ai_concurrency",
     "image_processing_concurrency",
     "similarity_threshold",

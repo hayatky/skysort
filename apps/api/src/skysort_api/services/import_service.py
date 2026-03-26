@@ -148,8 +148,10 @@ def _build_photo_record(
 
 def _settings_snapshot(settings, reuse_cache: bool) -> dict[str, object]:
     return {
+        "ai_provider": settings.ai_provider,
         "ai_base_url": settings.ai_base_url,
         "ai_model_name": settings.ai_model_name,
+        "allow_remote_ai": settings.allow_remote_ai,
         "ai_concurrency": settings.ai_concurrency,
         "image_processing_concurrency": settings.image_processing_concurrency,
         "thumbnail_size": settings.thumbnail_size,

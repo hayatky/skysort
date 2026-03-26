@@ -18,14 +18,26 @@ var/      runtime outputs (cache, DB, logs, tmp)
 
 - `uv` for Python environment and execution
 - `pnpm` for the frontend workspace
-- LM Studio or another local OpenAI-compatible vision endpoint
+- LM Studio or another OpenAI-compatible vision endpoint
 - `ExifTool` for actual XMP write-back
 
 Recommended startup order:
 
-1. Start LM Studio and load the configured model.
+1. Start LM Studio and load the configured model, or export OpenRouter settings.
 2. Start the API.
 3. Start the web app.
+
+OpenRouter example:
+
+```bash
+export SKYSORT_AI_PROVIDER=openrouter
+export SKYSORT_AI_BASE_URL=https://openrouter.ai/api/v1
+export SKYSORT_AI_MODEL_NAME=openai/gpt-5-nano
+export SKYSORT_ALLOW_REMOTE_AI=true
+export SKYSORT_AI_API_KEY=your_api_key
+export SKYSORT_AI_REFERER=https://example.com/skysort
+export SKYSORT_AI_TITLE=SkySort
+```
 
 ## Backend Setup
 
@@ -48,6 +60,7 @@ Important runtime behavior:
 - thumbnails and previews live in `var/cache`
 - application logs live in `var/logs/app.log`
 - AI health is checked before `POST /api/jobs/{job_id}/analyze`
+- remote AI endpoints are blocked unless `allow_remote_ai=true`
 - XMP export defaults to `dry_run=true`
 - unchanged files reuse deterministic preview/thumbnail cache keys derived from path + hash + size + mtime
 - ARW preview generation prefers the embedded JPEG preview and falls back to `rawpy` demosaic only when needed
@@ -138,6 +151,7 @@ Before production use, validate against a benchmark burst set with expected best
 - PNG is display-only in Phase 1 and excluded from XMP write-back.
 - ARW metadata is sourced from the embedded preview when available; tags not present there remain `null` rather than blocking the job.
 - Settings changes that affect scoring are snapshotted per job, so a full re-run with new thresholds creates a new analysis job instead of mutating old results.
+- OpenRouter credentials are env-only and are never returned by `GET /api/settings` or stored in `settings.json`.
 
 ## XMP Safety Policy
 

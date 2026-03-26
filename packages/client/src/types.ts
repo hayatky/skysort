@@ -40,8 +40,11 @@ export interface JobProgress {
 }
 
 export interface AIHealthStatus {
+  provider: "lm_studio" | "openrouter";
   reachable: boolean;
   localhost_only: boolean;
+  remote_allowed: boolean;
+  auth_configured: boolean;
   available_models: string[];
   configured_model: string;
   configured_model_exists: boolean;
@@ -206,8 +209,10 @@ export interface SettingsResponse {
     star_2: number;
     reject: number;
   };
+  ai_provider: "lm_studio" | "openrouter";
   ai_base_url: string;
   ai_model_name: string;
+  allow_remote_ai: boolean;
   ai_concurrency: number;
   image_processing_concurrency: number;
   image_concurrency?: number;
