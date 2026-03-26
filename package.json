@@ -8,6 +8,7 @@
     "build:web": "pnpm --filter @skysort/web build",
     "test:web": "pnpm --filter @skysort/web test",
     "lint:web": "pnpm --filter @skysort/web lint",
-    "typecheck:web": "pnpm --filter @skysort/web typecheck"
+    "typecheck:web": "pnpm --filter @skysort/web typecheck",
+    "generate:client": "node scripts/generate-client.mjs"
   }
 }

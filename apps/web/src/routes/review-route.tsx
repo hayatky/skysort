@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { Hero } from "@/components/hero";
@@ -99,6 +100,11 @@ export function ReviewRoute() {
         </div>
         {selected ? (
           <div className="actions" style={{ marginBottom: 16 }}>
+            {selected.group_id ? (
+              <Link className="button secondary" to={`/groups/${selected.group_id}?job=${jobId}`}>
+                Open Group
+              </Link>
+            ) : null}
             <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, best_cut_flag: !selected.best_cut_flag })}>Toggle Best Cut</button>
             <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, reviewed_flag: !selected.reviewed_flag })}>Toggle Reviewed</button>
             <button className="button secondary" type="button" onClick={() => reanalyzePhoto.mutate(selected.photo_id)}>Reanalyze Photo</button>

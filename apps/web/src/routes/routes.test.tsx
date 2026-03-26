@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Sidebar } from "@/components/sidebar";
 import { ExportRoute } from "@/routes/export-route";
 import { GroupDetailRoute } from "@/routes/group-detail-route";
 import { ImportRoute } from "@/routes/import-route";
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   failures: { data: { items: [{ stage: "preview_exif", reason: "broken metadata" }] } },
   groups: { data: [{ id: "group_1", group_size: 1, unreviewed_count: 1, items: [{ photo_id: "photo_1", selection_status: "normal", pick_flag: false }] }] },
   group: { data: { id: "group_1", photos: [{ photo_id: "photo_1", file_name: "alpha.jpg", preview_url: "/preview.jpg", thumb_url: "/thumb.jpg", rating: 4, provisional_rating: 3, technical_score_total: 88, semantic_score: 77, evaluation_status: "final", selection_status: "normal", ai_reason: "best angle", pick_flag: true, best_cut_flag: true, reviewed_flag: true }] } },
-  photos: { data: { items: [{ photo_id: "photo_1", file_name: "alpha.jpg", thumb_url: "/thumb.jpg", rating: 5, selection_status: "normal", evaluation_status: "final", pick_flag: true, best_cut_flag: true, reviewed_flag: false, technical_score_total: 90, semantic_score: 92 }], total: 1 } },
+  photos: { data: { items: [{ photo_id: "photo_1", group_id: "group_1", file_name: "alpha.jpg", thumb_url: "/thumb.jpg", rating: 5, selection_status: "normal", evaluation_status: "final", pick_flag: true, best_cut_flag: true, reviewed_flag: false, technical_score_total: 90, semantic_score: 92 }], total: 1 } },
   photoMutation: { mutate: vi.fn() },
   reanalyzePhoto: { mutate: vi.fn() },
   reanalyzeGroup: { mutate: vi.fn() },
@@ -134,8 +135,22 @@ describe("route rendering", () => {
 
     expect(reviewMarkup).toContain("Global review for star tiers and reject lanes.");
     expect(reviewMarkup).toContain("alpha.jpg");
+    expect(reviewMarkup).toContain("/groups/group_1?job=job_123");
     expect(exportMarkup).toContain("Dry-run first, then commit metadata writes.");
     expect(exportMarkup).toContain("/tmp/export.csv");
+  });
+
+  it("preserves active job in sidebar navigation", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/review?job=job_123"]}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("/groups?job=job_123");
+    expect(markup).toContain("/review?job=job_123");
+    expect(markup).toContain("/export?job=job_123");
+    expect(markup).toContain("/settings?job=job_123");
   });
 
   it("renders settings route with threshold controls", () => {

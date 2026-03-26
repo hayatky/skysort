@@ -53,6 +53,13 @@ class PreviousAnalysisContext:
     ai_responses_by_group_id: dict[str, list[AIResponse]]
 
 
+@dataclass(slots=True)
+class GroupCompareResult:
+    best_photo_id: str | None
+    ranking_by_photo_id: dict[str, dict[str, object]]
+    drop_candidates: set[str]
+
+
 def run_analysis(session, job_id: str) -> None:
     job_repo = JobRepository(session)
     photo_repo = PhotoRepository(session)
@@ -317,13 +324,11 @@ def _evaluate_group(
         photo_id: _evaluate_single_photo(eval_repo, photo_repo.get(photo_id), group.id, technical_scores[photo_id], ai_client)
         for photo_id in single_eval_ids
     }
-    compare_pool = candidate_pool[: max(settings.candidate_limit * 2, 6)]
-    best_photo_id = _choose_best_photo(eval_repo, photo_repo, group.id, compare_pool or ordered_ids[:1], ai_client)
+    compare_result = _choose_best_photo(eval_repo, photo_repo, group.id, candidate_pool or ordered_ids[:1], ai_client)
+    for photo_id, ranking in compare_result.ranking_by_photo_id.items():
+        semantic_results[photo_id] = _merge_group_compare_semantic(semantic_results.get(photo_id), ranking)
 
-    overridden_best = next((item.photo_id for item in current_evaluations.values() if item and item.user_override_flag and item.best_cut_flag), None)
-    chosen_best = overridden_best or best_photo_id or (ordered_ids[0] if ordered_ids else None)
-    group.best_photo_id = chosen_best
-    group.representative_photo_id = ordered_ids[0] if ordered_ids else group.representative_photo_id
+    resolved_outcomes: dict[str, tuple[SemanticMetrics, int | None, str, str]] = {}
     group.stale_flag = False
     group.stale_reason = None
     group.updated_at = datetime.now(timezone.utc)
@@ -344,6 +349,33 @@ def _evaluate_group(
                 _weight_map(),
                 _threshold_map(),
             )
+        if photo_id in compare_result.drop_candidates and not (current and current.user_override_flag):
+            rating = None
+            selection_status = "rejected"
+            evaluation_status = "final"
+        resolved_outcomes[photo_id] = (semantic, rating, selection_status, evaluation_status)
+
+    overridden_best = next(
+        (
+            item.photo_id
+            for item in current_evaluations.values()
+            if item and item.user_override_flag and item.best_cut_flag and item.selection_status != "rejected"
+        ),
+        None,
+    )
+    chosen_best = overridden_best or _choose_best_photo_from_outcomes(
+        ordered_ids,
+        current_evaluations,
+        resolved_outcomes,
+        group.representative_photo_id,
+        compare_result.best_photo_id,
+    )
+    group.best_photo_id = chosen_best
+    group.representative_photo_id = ordered_ids[0] if ordered_ids else group.representative_photo_id
+
+    for photo_id in photo_ids:
+        current = current_evaluations.get(photo_id)
+        semantic, rating, selection_status, evaluation_status = resolved_outcomes[photo_id]
         if current and current.user_override_flag:
             rating = current.rating
             selection_status = current.selection_status
@@ -352,7 +384,7 @@ def _evaluate_group(
             reviewed_flag = current.reviewed_flag
         else:
             pick_flag = bool(rating is not None and rating >= 4)
-            best_cut_flag = photo_id == chosen_best
+            best_cut_flag = photo_id == chosen_best and selection_status != "rejected"
             reviewed_flag = current.reviewed_flag if current else False
         evaluation = _build_evaluation(
             photo_id=photo_id,
@@ -428,19 +460,30 @@ def _choose_best_photo(
     group_id: str | None,
     photo_ids: list[str],
     ai_client: VisionLanguageModelClient,
-) -> str | None:
+) -> GroupCompareResult:
     contenders = list(photo_ids)
     if not contenders:
-        return None
+        return GroupCompareResult(best_photo_id=None, ranking_by_photo_id={}, drop_candidates=set())
+
+    ranking_by_photo_id: dict[str, dict[str, object]] = {}
+    drop_candidates: set[str] = set()
     while len(contenders) > 6:
         winners: list[str] = []
         for index in range(0, len(contenders), 6):
             chunk = contenders[index : index + 6]
-            winner = _compare_chunk(eval_repo, photo_repo, group_id, chunk, ai_client)
-            if winner:
-                winners.append(winner)
-        contenders = winners or contenders[:6]
-    return _compare_chunk(eval_repo, photo_repo, group_id, contenders, ai_client) or contenders[0]
+            result = _compare_chunk(eval_repo, photo_repo, group_id, chunk, ai_client)
+            _merge_group_compare_payloads(ranking_by_photo_id, result.ranking_by_photo_id)
+            drop_candidates.update(result.drop_candidates)
+            winners.append(result.best_photo_id or chunk[0])
+        contenders = list(dict.fromkeys(winners))
+    result = _compare_chunk(eval_repo, photo_repo, group_id, contenders, ai_client)
+    _merge_group_compare_payloads(ranking_by_photo_id, result.ranking_by_photo_id)
+    drop_candidates.update(result.drop_candidates)
+    return GroupCompareResult(
+        best_photo_id=result.best_photo_id or contenders[0],
+        ranking_by_photo_id=ranking_by_photo_id,
+        drop_candidates=drop_candidates,
+    )
 
 
 def _compare_chunk(
@@ -449,7 +492,7 @@ def _compare_chunk(
     group_id: str | None,
     photo_ids: list[str],
     ai_client: VisionLanguageModelClient,
-) -> str | None:
+) -> GroupCompareResult:
     prompt, prompt_hash = load_prompt("group_compare_v1")
     content = [{"type": "text", "text": prompt.replace("{{ candidate_photo_ids }}", ", ".join(photo_ids))}]
     for photo_id in photo_ids:
@@ -483,9 +526,100 @@ def _compare_chunk(
                 photo_ids,
             )
     if response.parsed_json is None:
-        return None
+        return GroupCompareResult(best_photo_id=None, ranking_by_photo_id={}, drop_candidates=set())
+
+    ranking_by_photo_id = {}
+    for item in response.parsed_json.get("ranking", []):
+        if not isinstance(item, dict):
+            continue
+        photo_id = item.get("photo_id")
+        if not photo_id or str(photo_id) not in photo_ids:
+            continue
+        ranking_by_photo_id[str(photo_id)] = {
+            "semantic_score": item.get("semantic_score"),
+            "rarity_score": item.get("rarity_score"),
+            "reason": item.get("reason"),
+            "rank": item.get("rank"),
+        }
+
+    drop_candidates = {
+        str(photo_id)
+        for photo_id in response.parsed_json.get("drop_candidates", [])
+        if str(photo_id) in photo_ids
+    }
     best_photo_id = response.parsed_json.get("best_photo_id")
-    return str(best_photo_id) if best_photo_id else None
+    return GroupCompareResult(
+        best_photo_id=str(best_photo_id) if best_photo_id else None,
+        ranking_by_photo_id=ranking_by_photo_id,
+        drop_candidates=drop_candidates,
+    )
+
+
+def _merge_group_compare_semantic(existing: SemanticMetrics | None, ranking: dict[str, object]) -> SemanticMetrics:
+    merged = existing or SemanticMetrics()
+    if ranking.get("semantic_score") is not None:
+        merged.semantic_score = float(ranking["semantic_score"])
+    if ranking.get("rarity_score") is not None:
+        merged.rarity_score = float(ranking["rarity_score"])
+    if ranking.get("reason"):
+        merged.reason = str(ranking["reason"])
+    return merged
+
+
+def _merge_group_compare_payloads(target: dict[str, dict[str, object]], source: dict[str, dict[str, object]]) -> None:
+    for photo_id, payload in source.items():
+        merged = dict(target.get(photo_id, {}))
+        merged.update({key: value for key, value in payload.items() if value is not None})
+        target[photo_id] = merged
+
+
+def _choose_best_photo_from_outcomes(
+    ordered_ids: list[str],
+    current_evaluations: dict[str, PhotoEvaluation | None],
+    outcomes: dict[str, tuple[SemanticMetrics, int | None, str, str]],
+    representative_photo_id: str | None,
+    preferred_photo_id: str | None,
+) -> str | None:
+    candidates = [
+        photo_id
+        for photo_id in ordered_ids
+        if outcomes[photo_id][2] != "rejected"
+    ]
+    if not candidates:
+        return None
+    if preferred_photo_id and preferred_photo_id in candidates:
+        return preferred_photo_id
+
+    rated = [photo_id for photo_id in candidates if outcomes[photo_id][1] is not None]
+    if rated:
+        return sorted(
+            rated,
+            key=lambda photo_id: (
+                outcomes[photo_id][1] or 0,
+                current_evaluations[photo_id].provisional_rating if current_evaluations[photo_id] else 0,
+                -ordered_ids.index(photo_id),
+            ),
+            reverse=True,
+        )[0]
+
+    provisional = [
+        photo_id
+        for photo_id in candidates
+        if current_evaluations[photo_id] and current_evaluations[photo_id].provisional_rating is not None
+    ]
+    if provisional:
+        return sorted(
+            provisional,
+            key=lambda photo_id: (
+                current_evaluations[photo_id].provisional_rating if current_evaluations[photo_id] else 0,
+                -ordered_ids.index(photo_id),
+            ),
+            reverse=True,
+        )[0]
+
+    if representative_photo_id and representative_photo_id in candidates:
+        return representative_photo_id
+    return candidates[0]
 
 
 def _store_ai_response(

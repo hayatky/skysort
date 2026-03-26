@@ -111,9 +111,12 @@ cd /Users/yuta/Git/skysort
 uv run python -m compileall -q apps/api/src
 uv run --project apps/api pytest
 pnpm --filter @skysort/web test
+pnpm generate:client
 ```
 
 The repository includes backend tests for import diffing, RAW preview selection, API validation, grouping order, and XMP helpers, plus frontend Vitest coverage for the main Phase 1 routes.
+
+`pnpm generate:client` regenerates the canonical OpenAPI snapshot at `packages/client/openapi.json`.
 
 ## Benchmark Validation
 

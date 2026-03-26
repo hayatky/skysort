@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 
 import type { NavLinkItem } from "@/types/ui";
 
@@ -12,6 +12,9 @@ const links: NavLinkItem[] = [
 ];
 
 export function Sidebar() {
+  const location = useLocation();
+  const jobId = new URLSearchParams(location.search).get("job");
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -21,7 +24,15 @@ export function Sidebar() {
       </div>
       <nav className="nav">
         {links.map((link) => (
-          <NavLink key={link.path} to={link.path} end>
+          <NavLink
+            key={link.path}
+            to={
+              jobId && link.path !== "/"
+                ? { pathname: link.path, search: `?job=${encodeURIComponent(jobId)}` }
+                : link.path
+            }
+            end
+          >
             {link.label}
           </NavLink>
         ))}
