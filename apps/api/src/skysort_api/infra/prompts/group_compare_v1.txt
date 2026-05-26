@@ -6,3 +6,13 @@
 - ベストカット
 - 他画像との差分価値
 - 削除候補
+
+必須JSON形式:
+{
+  "schema_version": "v1",
+  "best_photo_id": "入力画像のphoto_id",
+  "ranking": [
+    {"photo_id": "入力画像のphoto_id", "rank": 1, "semantic_score": 0, "rarity_score": 0, "reason": "短い根拠"}
+  ],
+  "drop_candidates": ["入力画像のphoto_id"]
+}

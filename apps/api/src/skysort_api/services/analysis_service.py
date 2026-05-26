@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from skysort_api.domain.evaluation import (
     SemanticMetrics,
@@ -16,7 +17,7 @@ from skysort_api.domain.evaluation import (
     provisional_rating_from_technical,
 )
 from skysort_api.domain.grouping import PhotoCandidate, should_start_new_group
-from skysort_api.infra.ai_client import VisionLanguageModelClient
+from skysort_api.infra.ai_client import AIResult, VisionLanguageModelClient
 from skysort_api.infra.file_scan import build_source_signature
 from skysort_api.infra.image_tools import (
     build_data_url,
@@ -32,6 +33,8 @@ from skysort_api.infra.settings import get_settings
 from .repositories import EvaluationRepository, FailureRepository, GroupRepository, JobRepository, PhotoRepository
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
+R = TypeVar("R")
 
 
 @dataclass(slots=True)
@@ -60,6 +63,58 @@ class GroupCompareResult:
     drop_candidates: set[str]
 
 
+@dataclass(slots=True)
+class PhotoPreparationTask:
+    photo_id: str
+    file_path: str
+    source_signature: str
+    reuse_cached_metadata: bool
+    cached_metadata: dict[str, object] | None
+
+
+@dataclass(slots=True)
+class PhotoPreparationResult:
+    photo_id: str
+    thumb_path: str
+    preview_path: str
+    metadata: dict[str, object]
+    similarity_seed: float
+
+
+@dataclass(slots=True)
+class TechnicalScoreResult:
+    photo_id: str
+    metrics: TechnicalMetrics
+    total: float
+
+
+@dataclass(slots=True)
+class SinglePhotoAITask:
+    photo_id: str
+    job_id: str
+    group_id: str | None
+    prompt_hash: str
+    prompt_name: str
+    target_photo_ids: list[str]
+    payload: dict[str, object]
+
+
+@dataclass(slots=True)
+class SinglePhotoAIResult:
+    photo_id: str
+    task: SinglePhotoAITask
+    response: AIResult
+    semantic: SemanticMetrics
+
+
+class PreviewGenerationError(RuntimeError):
+    pass
+
+
+class MetadataExtractionError(RuntimeError):
+    pass
+
+
 def run_analysis(session, job_id: str) -> None:
     job_repo = JobRepository(session)
     photo_repo = PhotoRepository(session)
@@ -86,12 +141,28 @@ def run_analysis(session, job_id: str) -> None:
     session.commit()
 
     reuse_cache = _reuse_cache_enabled(job)
+    settings_snapshot = get_settings()
     photos = photo_repo.list_by_job(job_id)
     candidate_records: list[tuple[Photo, PhotoCandidate]] = []
-    for photo in photos:
+    preparation_tasks = [
+        _build_photo_preparation_task(
+            photo,
+            previous_photo=previous_context.photos_by_path.get(photo.file_path) if previous_context else None,
+            reuse_cache=reuse_cache,
+        )
+        for photo in photos
+    ]
+    photos_by_id = {photo.id: photo for photo in photos}
+    for task, result in _map_with_concurrency(
+        preparation_tasks,
+        max_workers=settings_snapshot.image_processing_concurrency,
+        worker=_prepare_photo_from_task,
+    ):
+        photo = photos_by_id[task.photo_id]
         try:
-            previous_photo = previous_context.photos_by_path.get(photo.file_path) if previous_context else None
-            _prepare_photo(photo, previous_photo=previous_photo, reuse_cache=reuse_cache)
+            if isinstance(result, BaseException):
+                raise result
+            _apply_photo_preparation_result(photo, result)
             candidate_records.append(
                 (
                     photo,
@@ -99,13 +170,13 @@ def run_analysis(session, job_id: str) -> None:
                         photo_id=photo.id,
                         capture_timestamp_ms=photo.capture_timestamp_ms,
                         capture_order_index=photo.capture_order_index,
-                        similarity_seed=compute_similarity_seed(Path(photo.file_path)),
+                        similarity_seed=result.similarity_seed,
                     ),
                 )
             )
         except Exception as exc:
             logger.exception("Preview/EXIF processing failed for %s", photo.file_path)
-            _record_failure(session, job, failure_repo, "preview_exif", str(exc), photo=photo, retryable=True)
+            _record_failure(session, job, failure_repo, "preview_exif", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("preview_exif", exc))
         finally:
             job.imported_files = len(candidate_records)
             session.commit()
@@ -121,15 +192,37 @@ def run_analysis(session, job_id: str) -> None:
     session.commit()
 
     job.current_stage = "technically_scored"
-    for photo in ordered_photos:
+    technical_tasks = [photo for photo in ordered_photos if not photo.is_missing]
+    reusable_photo_ids: set[str] = set()
+    photos_to_score: list[Photo] = []
+    for photo in technical_tasks:
+        try:
+            if _reuse_technical_score(eval_repo, previous_context, photo, job.id):
+                reusable_photo_ids.add(photo.id)
+                _refresh_progress_counts(job, eval_repo)
+                session.commit()
+            else:
+                photos_to_score.append(photo)
+        except Exception as exc:
+            logger.exception("Technical score reuse failed for %s", photo.file_path)
+            _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True)
+            _refresh_progress_counts(job, eval_repo)
+            session.commit()
+    for photo, result in _map_with_concurrency(
+        photos_to_score,
+        max_workers=settings_snapshot.image_processing_concurrency,
+        worker=_compute_technical_score_result,
+    ):
         if photo.is_missing:
             continue
         try:
-            if not _reuse_technical_score(eval_repo, previous_context, photo, job.id):
-                _score_photo(session, eval_repo, photo, job.id)
+            if isinstance(result, BaseException):
+                raise result
+            if photo.id not in reusable_photo_ids:
+                _apply_technical_score_result(session, eval_repo, photo, job.id, result)
         except Exception as exc:
             logger.exception("Technical scoring failed for %s", photo.file_path)
-            _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True)
+            _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("technical_scoring", exc))
         finally:
             _refresh_progress_counts(job, eval_repo)
             session.commit()
@@ -151,7 +244,7 @@ def run_analysis(session, job_id: str) -> None:
                 _evaluate_group(session, eval_repo, photo_repo, failure_repo, job, group, member_ids, ai_client)
         except Exception as exc:
             logger.exception("Group AI evaluation failed for %s", group.id)
-            _record_failure(session, job, failure_repo, "semantically_scored", str(exc), group=group, retryable=True)
+            _record_failure(session, job, failure_repo, "semantically_scored", str(exc), group=group, retryable=True, reason_code=_reason_code_for_exception("semantically_scored", exc))
         finally:
             _refresh_progress_counts(job, eval_repo)
             session.commit()
@@ -196,17 +289,77 @@ def reanalyze_photos(session, job_id: str, photo_ids: list[str], scope: str) -> 
     session.commit()
 
 
-def _prepare_photo(photo: Photo, *, previous_photo: Photo | None, reuse_cache: bool) -> None:
-    source_signature = _source_signature_for_photo(photo)
-    thumb_path, preview_path = ensure_preview_assets(path=Path(photo.file_path), source_signature=source_signature)
-    photo.thumb_path = str(thumb_path)
-    photo.preview_path = str(preview_path)
+def _map_with_concurrency(
+    items: list[T],
+    *,
+    max_workers: int,
+    worker: Callable[[T], R],
+) -> list[tuple[T, R | BaseException]]:
+    bounded_workers = max(1, min(max_workers, len(items))) if items else 1
+    if bounded_workers == 1:
+        results: list[tuple[T, R | BaseException]] = []
+        for item in items:
+            try:
+                results.append((item, worker(item)))
+            except BaseException as exc:
+                results.append((item, exc))
+        return results
+    with ThreadPoolExecutor(max_workers=bounded_workers) as executor:
+        futures = [executor.submit(worker, item) for item in items]
+        mapped: list[tuple[T, R | BaseException]] = []
+        for item, future in zip(items, futures, strict=True):
+            try:
+                mapped.append((item, future.result()))
+            except BaseException as exc:
+                mapped.append((item, exc))
+        return mapped
 
-    if reuse_cache and previous_photo is not None and _same_source_signature(photo, previous_photo) and _has_cached_metadata(photo):
-        photo.updated_at = datetime.now(timezone.utc)
-        return
 
-    metadata = extract_image_metadata(Path(photo.file_path))
+def _build_photo_preparation_task(
+    photo: Photo,
+    *,
+    previous_photo: Photo | None,
+    reuse_cache: bool,
+) -> PhotoPreparationTask:
+    reuse_cached_metadata = bool(
+        reuse_cache
+        and previous_photo is not None
+        and _same_source_signature(photo, previous_photo)
+        and _has_cached_metadata(previous_photo)
+    )
+    cached_metadata = _metadata_from_photo(previous_photo) if previous_photo is not None and reuse_cached_metadata else None
+    return PhotoPreparationTask(
+        photo_id=photo.id,
+        file_path=photo.file_path,
+        source_signature=_source_signature_for_photo(photo),
+        reuse_cached_metadata=reuse_cached_metadata,
+        cached_metadata=cached_metadata,
+    )
+
+
+def _prepare_photo_from_task(task: PhotoPreparationTask) -> PhotoPreparationResult:
+    file_path = Path(task.file_path)
+    try:
+        thumb_path, preview_path = ensure_preview_assets(path=file_path, source_signature=task.source_signature)
+    except Exception as exc:
+        raise PreviewGenerationError(str(exc)) from exc
+    try:
+        metadata = task.cached_metadata if task.reuse_cached_metadata and task.cached_metadata is not None else extract_image_metadata(file_path)
+    except Exception as exc:
+        raise MetadataExtractionError(str(exc)) from exc
+    return PhotoPreparationResult(
+        photo_id=task.photo_id,
+        thumb_path=str(thumb_path),
+        preview_path=str(preview_path),
+        metadata=metadata,
+        similarity_seed=compute_similarity_seed(file_path),
+    )
+
+
+def _apply_photo_preparation_result(photo: Photo, result: PhotoPreparationResult) -> None:
+    photo.thumb_path = result.thumb_path
+    photo.preview_path = result.preview_path
+    metadata = result.metadata
     photo.width = metadata["width"]
     photo.height = metadata["height"]
     photo.orientation = metadata["orientation"]
@@ -219,6 +372,27 @@ def _prepare_photo(photo: Photo, *, previous_photo: Photo | None, reuse_cache: b
     photo.iso = metadata["iso"]
     photo.shutter_speed = metadata["shutter_speed"]
     photo.updated_at = datetime.now(timezone.utc)
+
+
+def _metadata_from_photo(photo: Photo) -> dict[str, object]:
+    return {
+        "width": photo.width,
+        "height": photo.height,
+        "orientation": photo.orientation,
+        "capture_time": photo.capture_time,
+        "capture_timestamp_ms": photo.capture_timestamp_ms,
+        "camera_model": photo.camera_model,
+        "lens_model": photo.lens_model,
+        "focal_length": photo.focal_length,
+        "aperture": photo.aperture,
+        "iso": photo.iso,
+        "shutter_speed": photo.shutter_speed,
+    }
+
+
+def _prepare_photo(photo: Photo, *, previous_photo: Photo | None, reuse_cache: bool) -> None:
+    task = _build_photo_preparation_task(photo, previous_photo=previous_photo, reuse_cache=reuse_cache)
+    _apply_photo_preparation_result(photo, _prepare_photo_from_task(task))
 
 
 def _sort_candidate_records(candidate_records: list[tuple[Photo, PhotoCandidate]]) -> list[tuple[Photo, PhotoCandidate]]:
@@ -250,10 +424,26 @@ def _group_candidates(job_id: str, candidate_records: list[tuple[Photo, PhotoCan
 
 
 def _score_photo(session, eval_repo: EvaluationRepository, photo: Photo, job_id: str) -> None:
+    _apply_technical_score_result(session, eval_repo, photo, job_id, _compute_technical_score_result(photo))
+
+
+def _compute_technical_score_result(photo: Photo) -> TechnicalScoreResult:
     settings = get_settings()
     metrics_raw = compute_technical_metrics(Path(photo.file_path), settings.highlight_threshold, settings.shadow_threshold)
     metrics = TechnicalMetrics(**metrics_raw)
     total = compute_technical_total(metrics)
+    return TechnicalScoreResult(photo_id=photo.id, metrics=metrics, total=total)
+
+
+def _apply_technical_score_result(
+    session,
+    eval_repo: EvaluationRepository,
+    photo: Photo,
+    job_id: str,
+    result: TechnicalScoreResult,
+) -> None:
+    metrics = result.metrics
+    total = result.total
     eval_repo.add_technical(
         TechnicalScore(
             id=f"tech_{uuid.uuid4().hex[:10]}",
@@ -307,23 +497,48 @@ def _evaluate_group(
         for photo_id in photo_ids
     }
     technical_scores = {photo_id: eval_repo.technical_for_photo(photo_id, job.id) for photo_id in photo_ids}
-    ordered_ids = sorted(
+    ordered_ids, candidate_pool, single_eval_ids = _select_ai_candidate_pool(
         photo_ids,
-        key=lambda photo_id: (technical_scores[photo_id].technical_score_total if technical_scores[photo_id] else 0.0),
-        reverse=True,
+        technical_scores,
+        reject_threshold=_threshold_map()["reject"],
+        candidate_limit=settings.candidate_limit,
     )
-    candidate_pool = [
-        photo_id
-        for photo_id in ordered_ids
-        if (technical_scores[photo_id].technical_score_total if technical_scores[photo_id] else 0.0) >= _threshold_map()["reject"]
-    ]
-    if not candidate_pool:
-        candidate_pool = ordered_ids[:1]
-    single_eval_ids = candidate_pool[: settings.candidate_limit]
-    semantic_results = {
-        photo_id: _evaluate_single_photo(eval_repo, photo_repo.get(photo_id), group.id, technical_scores[photo_id], ai_client)
-        for photo_id in single_eval_ids
-    }
+    if settings.ai_concurrency <= 1:
+        semantic_results = {
+            photo_id: _evaluate_single_photo(eval_repo, photo_repo.get(photo_id), group.id, technical_scores[photo_id], ai_client)
+            for photo_id in single_eval_ids
+        }
+    else:
+        single_ai_tasks = [
+            task
+            for task in (
+                _build_single_photo_ai_task(photo_repo.get(photo_id), group.id, technical_scores[photo_id])
+                for photo_id in single_eval_ids
+            )
+            if task is not None
+        ]
+        semantic_results: dict[str, SemanticMetrics] = {}
+        for task, result in _map_with_concurrency(
+            single_ai_tasks,
+            max_workers=settings.ai_concurrency,
+            worker=lambda item: _execute_single_photo_ai_task(item, ai_client),
+        ):
+            if isinstance(result, BaseException):
+                raise result
+            _store_single_photo_ai_result(eval_repo, result)
+            semantic_results[result.photo_id] = result.semantic
+    for photo_id, semantic in semantic_results.items():
+        if semantic.ai_failed:
+            _record_failure(
+                session,
+                job,
+                failure_repo,
+                "semantically_scored",
+                "AI response could not be parsed or did not match schema",
+                photo=photo_repo.get(photo_id),
+                retryable=True,
+                reason_code="json_parse_failed",
+            )
     compare_result = _choose_best_photo(eval_repo, photo_repo, group.id, candidate_pool or ordered_ids[:1], ai_client)
     for photo_id, ranking in compare_result.ranking_by_photo_id.items():
         semantic_results[photo_id] = _merge_group_compare_semantic(semantic_results.get(photo_id), ranking)
@@ -404,7 +619,7 @@ def _evaluate_group(
         eval_repo.add_evaluation(evaluation)
         _record_history(eval_repo, current, photo_id, job.id, rating, selection_status, "analysis_refresh")
     if chosen_best is None and photo_ids:
-        _record_failure(session, job, failure_repo, "semantically_scored", "Unable to select best photo", group=group, retryable=True)
+        _record_failure(session, job, failure_repo, "semantically_scored", "Unable to select best photo", group=group, retryable=True, reason_code="json_parse_failed")
 
 
 def _evaluate_single_photo(
@@ -414,8 +629,21 @@ def _evaluate_single_photo(
     technical: TechnicalScore | None,
     ai_client: VisionLanguageModelClient,
 ) -> SemanticMetrics:
-    if photo is None:
+    task = _build_single_photo_ai_task(photo, group_id, technical)
+    if task is None:
         return SemanticMetrics(ai_failed=True)
+    result = _execute_single_photo_ai_task(task, ai_client)
+    _store_single_photo_ai_result(eval_repo, result)
+    return result.semantic
+
+
+def _build_single_photo_ai_task(
+    photo: Photo | None,
+    group_id: str | None,
+    technical: TechnicalScore | None,
+) -> SinglePhotoAITask | None:
+    if photo is None:
+        return None
     prompt, prompt_hash = load_prompt("single_image_v1")
     content = prompt.replace("{{ photo_id }}", photo.id).replace("{{ technical_score_total }}", str(technical.technical_score_total if technical else 0)).replace("{{ capture_time }}", photo.capture_time.isoformat() if photo.capture_time else "")
     payload = {
@@ -431,20 +659,25 @@ def _evaluate_single_photo(
             }
         ],
     }
-    response = ai_client.evaluate("single", payload)
-    _store_ai_response(
-        eval_repo,
-        photo.job_id,
-        photo.id,
-        group_id,
-        "single",
-        prompt_hash,
-        "single_image_v1",
-        response,
-        [photo.id],
+    return SinglePhotoAITask(
+        photo_id=photo.id,
+        job_id=photo.job_id,
+        group_id=group_id,
+        prompt_hash=prompt_hash,
+        prompt_name="single_image_v1",
+        target_photo_ids=[photo.id],
+        payload=payload,
     )
+
+
+def _execute_single_photo_ai_task(
+    task: SinglePhotoAITask,
+    ai_client: VisionLanguageModelClient,
+) -> SinglePhotoAIResult:
+    response = ai_client.evaluate("single", task.payload)
+    response = _validate_ai_response(response, "single", task.target_photo_ids)
     ranking = response.parsed_json.get("ranking", [{}])[0] if response.parsed_json else {}
-    return SemanticMetrics(
+    semantic = SemanticMetrics(
         semantic_score=ranking.get("semantic_score"),
         composition_score=ranking.get("composition_score"),
         subject_state_score=ranking.get("subject_state_score"),
@@ -452,6 +685,43 @@ def _evaluate_single_photo(
         reason=ranking.get("reason"),
         ai_failed=response.parsed_json is None,
     )
+    return SinglePhotoAIResult(photo_id=task.photo_id, task=task, response=response, semantic=semantic)
+
+
+def _store_single_photo_ai_result(eval_repo: EvaluationRepository, result: SinglePhotoAIResult) -> None:
+    _store_ai_response(
+        eval_repo,
+        result.task.job_id,
+        result.task.photo_id,
+        result.task.group_id,
+        "single",
+        result.task.prompt_hash,
+        result.task.prompt_name,
+        result.response,
+        result.task.target_photo_ids,
+    )
+
+
+def _select_ai_candidate_pool(
+    photo_ids: list[str],
+    technical_scores: dict[str, TechnicalScore | None],
+    *,
+    reject_threshold: float,
+    candidate_limit: int,
+) -> tuple[list[str], list[str], list[str]]:
+    ordered_ids = sorted(
+        photo_ids,
+        key=lambda photo_id: (technical_scores[photo_id].technical_score_total if technical_scores[photo_id] else 0.0),
+        reverse=True,
+    )
+    candidate_pool = [
+        photo_id
+        for photo_id in ordered_ids
+        if (technical_scores[photo_id].technical_score_total if technical_scores[photo_id] else 0.0) >= reject_threshold
+    ]
+    if not candidate_pool:
+        candidate_pool = ordered_ids[:1]
+    return ordered_ids, candidate_pool, candidate_pool[:candidate_limit]
 
 
 def _choose_best_photo(
@@ -511,6 +781,7 @@ def _compare_chunk(
         "messages": [{"role": "user", "content": content}],
     }
     response = ai_client.evaluate("group_compare", payload)
+    response = _validate_ai_response(response, "group_compare", photo_ids)
     if photo_ids:
         exemplar = photo_repo.get(photo_ids[0])
         if exemplar is not None:
@@ -553,6 +824,70 @@ def _compare_chunk(
         ranking_by_photo_id=ranking_by_photo_id,
         drop_candidates=drop_candidates,
     )
+
+
+def _validate_ai_response(response, phase: str, photo_ids: list[str]):
+    payload = response.parsed_json
+    if payload is None:
+        return response
+    valid = _validate_single_payload(payload, photo_ids) if phase == "single" else _validate_group_compare_payload(payload, photo_ids)
+    if valid:
+        return response
+    response.parsed_json = None
+    response.status = "ai_eval_failed"
+    return response
+
+
+def _validate_common_ai_payload(payload: dict[str, object]) -> bool:
+    return payload.get("schema_version") == get_settings().response_schema_version
+
+
+def _validate_single_payload(payload: dict[str, object], photo_ids: list[str]) -> bool:
+    if not _validate_common_ai_payload(payload):
+        return False
+    ranking = payload.get("ranking")
+    if not isinstance(ranking, list) or len(ranking) != 1:
+        return False
+    return _validate_ranking_item(ranking[0], set(photo_ids), require_rank=False)
+
+
+def _validate_group_compare_payload(payload: dict[str, object], photo_ids: list[str]) -> bool:
+    if not _validate_common_ai_payload(payload):
+        return False
+    expected_ids = set(photo_ids)
+    best_photo_id = payload.get("best_photo_id")
+    if not isinstance(best_photo_id, str) or best_photo_id not in expected_ids:
+        return False
+    ranking = payload.get("ranking")
+    if not isinstance(ranking, list) or not ranking:
+        return False
+    if not all(_validate_ranking_item(item, expected_ids, require_rank=True) for item in ranking):
+        return False
+    drop_candidates = payload.get("drop_candidates")
+    return isinstance(drop_candidates, list) and all(isinstance(photo_id, str) and photo_id in expected_ids for photo_id in drop_candidates)
+
+
+def _validate_ranking_item(item: object, photo_ids: set[str], *, require_rank: bool) -> bool:
+    if not isinstance(item, dict):
+        return False
+    photo_id = item.get("photo_id")
+    if not isinstance(photo_id, str) or photo_id not in photo_ids:
+        return False
+    if require_rank and not isinstance(item.get("rank"), int):
+        return False
+    if not _is_number(item.get("semantic_score")):
+        return False
+    if "composition_score" in item and not _is_number(item.get("composition_score")):
+        return False
+    if "subject_state_score" in item and not _is_number(item.get("subject_state_score")):
+        return False
+    if "rarity_score" in item and not _is_number(item.get("rarity_score")):
+        return False
+    return isinstance(item.get("reason"), str) and bool(item.get("reason"))
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def _merge_group_compare_semantic(existing: SemanticMetrics | None, ranking: dict[str, object]) -> SemanticMetrics:
@@ -755,7 +1090,18 @@ def _refresh_progress_counts(job: Job, eval_repo: EvaluationRepository) -> None:
     job.semantically_scored_files = len([item for item in current if item.evaluation_status in {"final", "ai_eval_failed"}])
 
 
-def _record_failure(session, job: Job, failure_repo: FailureRepository, stage: str, message: str, *, photo: Photo | None = None, group: Group | None = None, retryable: bool) -> None:
+def _record_failure(
+    session,
+    job: Job,
+    failure_repo: FailureRepository,
+    stage: str,
+    message: str,
+    *,
+    photo: Photo | None = None,
+    group: Group | None = None,
+    retryable: bool,
+    reason_code: str | None = None,
+) -> None:
     payload = json.loads(job.error_messages_json)
     payload.append(f"{stage}:{message}")
     job.error_messages_json = json.dumps(payload)
@@ -766,7 +1112,7 @@ def _record_failure(session, job: Job, failure_repo: FailureRepository, stage: s
             photo_id=photo.id if photo else None,
             group_id=group.id if group else None,
             stage=stage,
-            reason_code=stage,
+            reason_code=reason_code or stage,
             message=message,
             retryable=retryable,
             created_at=datetime.now(timezone.utc),
@@ -798,6 +1144,17 @@ def _fail_job(session, job: Job, failure_repo: FailureRepository, stage: str, me
     job.finished_at = datetime.now(timezone.utc)
     _record_failure(session, job, failure_repo, stage, message, retryable=False)
     session.commit()
+
+
+def _reason_code_for_exception(stage: str, exc: BaseException) -> str:
+    if isinstance(exc, PreviewGenerationError):
+        return "preview_generation_failed"
+    if isinstance(exc, MetadataExtractionError):
+        return "metadata_extraction_failed"
+    text = f"{type(exc).__name__}:{exc}".lower()
+    if "timeout" in text and stage == "semantically_scored":
+        return "ai_timeout"
+    return stage
 
 
 def _health_ready(health) -> bool:

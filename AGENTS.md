@@ -174,6 +174,9 @@ var/       # 実行時生成物。Git 管理外
 - フロントエンド起動: `./scripts/dev-web.sh`
 - バックエンド構文確認: `uv run python -m compileall -q apps/api/src`
 - バックエンドテスト: `uv run --project apps/api pytest`
+- OpenAPI/client 更新: `pnpm generate:client`
+- フロントエンドテスト: `pnpm --filter @skysort/web test`
+- フロントエンド型確認: `pnpm --filter @skysort/web typecheck`
 
 設計変更、仕様変更、実装変更によってこのファイルの内容が古くなった場合は、関連変更と同じタイミングで直ちに更新してください。後続タスクでまとめて直す前提にしないでください。
 

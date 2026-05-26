@@ -4,8 +4,10 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
+from skysort_api.infra.file_scan import normalize_root_path
 from skysort_api.services.import_service import create_import_job
 from skysort_api.services.repositories import PhotoRepository
 
@@ -60,3 +62,25 @@ def test_create_import_job_reuses_unchanged_metadata_and_marks_missing(db_sessio
 
     assert second_by_name["charlie.jpg"].is_missing is True
     assert second_by_name["delta.jpg"].is_missing is False
+
+
+def test_normalize_root_path_handles_spaces_japanese_relative_and_symlink(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "写真 folder"
+    root.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(root, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    assert normalize_root_path("写真 folder") == root.resolve()
+    assert normalize_root_path(str(link)) == root.resolve()
+
+
+def test_normalize_root_path_rejects_missing_and_non_directory(tmp_path: Path) -> None:
+    file_path = tmp_path / "sample.jpg"
+    file_path.write_bytes(b"image")
+
+    with pytest.raises(FileNotFoundError):
+        normalize_root_path(str(tmp_path / "missing"))
+
+    with pytest.raises(NotADirectoryError):
+        normalize_root_path(str(file_path))

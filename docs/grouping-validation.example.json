@@ -1,0 +1,35 @@
+{
+  "schema_version": "v1",
+  "photos": [
+    {
+      "photo_id": "burst-a-001",
+      "capture_timestamp_ms": 1767225600000,
+      "capture_order_index": 0,
+      "similarity_seed": 0.12
+    },
+    {
+      "photo_id": "burst-a-002",
+      "capture_timestamp_ms": 1767225601200,
+      "capture_order_index": 1,
+      "similarity_seed": 0.14
+    },
+    {
+      "photo_id": "burst-b-001",
+      "capture_timestamp_ms": 1767225610000,
+      "capture_order_index": 2,
+      "similarity_seed": 0.68
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "default",
+      "time_proximity_seconds": 4,
+      "similarity_threshold": 0.86
+    },
+    {
+      "name": "strict-similarity",
+      "time_proximity_seconds": 4,
+      "similarity_threshold": 0.98
+    }
+  ]
+}

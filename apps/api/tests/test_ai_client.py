@@ -37,6 +37,26 @@ class _FakeHTTPXClient:
         return _FakeResponse({"choices": [{"message": {"content": '{"ok": true}'}}]})
 
 
+class _SequenceHTTPXClient:
+    contents: list[str] = []
+    calls: int = 0
+
+    def __init__(self, *args, **kwargs):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def post(self, path: str, json):
+        assert path == "/chat/completions"
+        content = self.contents[min(self.calls, len(self.contents) - 1)]
+        self.__class__.calls += 1
+        return _FakeResponse({"choices": [{"message": {"content": content}}]})
+
+
 def test_health_check_rejects_remote_endpoint_without_opt_in(isolated_runtime, monkeypatch) -> None:
     monkeypatch.setenv("SKYSORT_AI_PROVIDER", "openrouter")
     monkeypatch.setenv("SKYSORT_AI_BASE_URL", "https://openrouter.ai/api/v1")
@@ -86,3 +106,42 @@ def test_health_check_sends_openrouter_auth_headers(isolated_runtime, monkeypatc
         "HTTP-Referer": "https://example.test/skysort",
         "X-Title": "SkySort Test",
     }
+
+
+def test_evaluate_recovers_json_block_without_retry(isolated_runtime, monkeypatch) -> None:
+    _SequenceHTTPXClient.contents = ['prefix ```json\n{"ok": true}\n``` suffix']
+    _SequenceHTTPXClient.calls = 0
+    monkeypatch.setattr("skysort_api.infra.ai_client.httpx.Client", _SequenceHTTPXClient)
+    get_runtime_settings.cache_clear()
+
+    result = VisionLanguageModelClient().evaluate("single", {"model": "local", "messages": []})
+
+    assert result.parsed_json == {"ok": True}
+    assert result.status == "succeeded"
+    assert _SequenceHTTPXClient.calls == 1
+
+
+def test_evaluate_retries_until_json_parse_succeeds(isolated_runtime, monkeypatch) -> None:
+    _SequenceHTTPXClient.contents = ["not json", '{"ok": true}']
+    _SequenceHTTPXClient.calls = 0
+    monkeypatch.setattr("skysort_api.infra.ai_client.httpx.Client", _SequenceHTTPXClient)
+    get_runtime_settings.cache_clear()
+
+    result = VisionLanguageModelClient().evaluate("single", {"model": "local", "messages": []})
+
+    assert result.parsed_json == {"ok": True}
+    assert result.status == "retried"
+    assert _SequenceHTTPXClient.calls == 2
+
+
+def test_evaluate_marks_ai_eval_failed_after_max_retries(isolated_runtime, monkeypatch) -> None:
+    _SequenceHTTPXClient.contents = ["not json", "still not json", "nope"]
+    _SequenceHTTPXClient.calls = 0
+    monkeypatch.setattr("skysort_api.infra.ai_client.httpx.Client", _SequenceHTTPXClient)
+    get_runtime_settings.cache_clear()
+
+    result = VisionLanguageModelClient().evaluate("single", {"model": "local", "messages": []})
+
+    assert result.parsed_json is None
+    assert result.status == "ai_eval_failed"
+    assert _SequenceHTTPXClient.calls == 3

@@ -7,6 +7,9 @@ import type {
   FailureListResponse,
   GroupDetail,
   GroupListItem,
+  GroupMergeRequest,
+  GroupListResponse,
+  GroupSplitRequest,
   ImportRequest,
   ImportResponse,
   JobProgress,
@@ -84,14 +87,25 @@ export class SkySortApiClient {
       job_id: jobId,
       items: Array.isArray(raw.items)
         ? (raw.items as Array<Record<string, unknown>>).map((item) => ({
+            id: item.id ? String(item.id) : undefined,
             photo_id: (item.photo_id as string | null | undefined) ?? null,
             group_id: (item.group_id as string | null | undefined) ?? null,
+            file_name: (item.file_name as string | null | undefined) ?? null,
             stage: String(item.stage ?? "unknown"),
+            reason_code: item.reason_code ? String(item.reason_code) : undefined,
             reason: String(item.reason ?? item.message ?? item.reason_code ?? "Unknown failure"),
             retryable: Boolean(item.retryable),
+            retry_scope: item.retry_scope as ReanalyzeRequest["scope"] | undefined,
           }))
         : [],
     }));
+  }
+
+  retryFailure(jobId: string, failureId: string) {
+    return this.request<{ accepted: boolean; failure_id: string; scope: ReanalyzeRequest["scope"]; photo_ids: string[] }>(
+      `/jobs/${jobId}/failures/${failureId}/retry`,
+      { method: "POST" },
+    );
   }
 
   getAIHealth() {
@@ -116,52 +130,42 @@ export class SkySortApiClient {
     }));
   }
 
-  listGroups(jobId: string) {
-    return this.request<Record<string, unknown>>(`/groups?job_id=${encodeURIComponent(jobId)}`).then((raw) => {
+  listGroups(jobId: string, options: { filter?: Record<string, unknown>; sort?: string; page?: number; pageSize?: number } = {}) {
+    const params = new URLSearchParams({
+      job_id: jobId,
+      sort: options.sort ?? "created_at",
+      page: String(options.page ?? 1),
+      page_size: String(options.pageSize ?? 100),
+    });
+    if (options.filter && Object.keys(options.filter).length) {
+      params.set("filter", JSON.stringify(options.filter));
+    }
+    return this.request<Record<string, unknown>>(`/groups?${params.toString()}`).then((raw): GroupListResponse => {
       const items = Array.isArray(raw.items) ? (raw.items as Array<Record<string, unknown>>) : [];
-      return items.map((item) => ({
-        id: String(item.id),
-        job_id: String(item.job_id ?? jobId),
-        representative_photo_id: (item.representative_photo_id as string | null | undefined) ?? null,
-        representative_thumb_url: (item.representative_thumb_url as string | null | undefined) ?? null,
-        best_photo_id: (item.best_photo_id as string | null | undefined) ?? null,
-        group_size: Number(item.group_size ?? 0),
-        stale_flag: Boolean(item.stale_flag),
-        stale_reason: (item.stale_reason as string | null | undefined) ?? null,
-        reviewed_count: Number(item.reviewed_count ?? (item.reviewed ? Number(item.group_size ?? 0) : 0)),
-        unreviewed_count: Number(item.unreviewed_count ?? Math.max(0, Number(item.group_size ?? 0) - Number(item.reviewed_count ?? 0))),
-        technical_score_total: (item.technical_score_total as number | undefined) ?? null,
-        semantic_score: (item.semantic_score as number | undefined) ?? null,
-        best_rating: (item.best_rating as number | undefined) ?? null,
-        items: Array.isArray(item.items)
-          ? (item.items as Array<Record<string, unknown>>).map((photo) => ({
-              photo_id: String(photo.photo_id ?? photo.id),
-              id: String(photo.id ?? photo.photo_id),
-              group_id: (photo.group_id as string | null | undefined) ?? String(item.id),
-              file_name: String(photo.file_name ?? ""),
-              file_path: String(photo.file_path ?? ""),
-              capture_time: (photo.capture_time as string | null | undefined) ?? null,
-              thumb_url: (photo.thumb_url as string | null | undefined) ?? null,
-              preview_url: (photo.preview_url as string | null | undefined) ?? null,
-              rating: (photo.rating as number | null | undefined) ?? null,
-              provisional_rating: (photo.provisional_rating as number | null | undefined) ?? null,
-              selection_status: (photo.selection_status as PhotoReviewItem["selection_status"]) ?? "normal",
-              evaluation_status: (photo.evaluation_status as PhotoReviewItem["evaluation_status"]) ?? "provisional",
-              ai_reason: (photo.ai_reason as string | null | undefined) ?? null,
-              pick_flag: Boolean(photo.pick_flag),
-              best_cut_flag: Boolean(photo.best_cut_flag),
-              reviewed_flag: Boolean(photo.reviewed_flag),
-              user_override_flag: Boolean(photo.user_override_flag),
-              stale_flag: Boolean(photo.stale_flag),
-              stale_reason: (photo.stale_reason as string | null | undefined) ?? null,
-              technical_score_total: (photo.technical_score_total as number | undefined) ?? null,
-              semantic_score: (photo.semantic_score as number | undefined) ?? null,
-              composition_score: (photo.composition_score as number | undefined) ?? null,
-              subject_state_score: (photo.subject_state_score as number | undefined) ?? null,
-              rarity_score: (photo.rarity_score as number | undefined) ?? null,
-            }))
-          : undefined,
-      }));
+      return {
+        items: items.map((item) => ({
+          id: String(item.id),
+          job_id: String(item.job_id ?? jobId),
+          representative_photo_id: (item.representative_photo_id as string | null | undefined) ?? null,
+          representative_thumb_url: (item.representative_thumb_url as string | null | undefined) ?? null,
+          best_photo_id: (item.best_photo_id as string | null | undefined) ?? null,
+          group_size: Number(item.group_size ?? 0),
+          stale_flag: Boolean(item.stale_flag),
+          stale_reason: (item.stale_reason as string | null | undefined) ?? null,
+          reviewed_count: Number(item.reviewed_count ?? (item.reviewed ? Number(item.group_size ?? 0) : 0)),
+          unreviewed_count: Number(item.unreviewed_count ?? Math.max(0, Number(item.group_size ?? 0) - Number(item.reviewed_count ?? 0))),
+          technical_score_total: (item.technical_score_total as number | undefined) ?? null,
+          semantic_score: (item.semantic_score as number | undefined) ?? null,
+          best_rating: (item.best_rating as number | undefined) ?? null,
+          items: Array.isArray(item.items)
+            ? (item.items as Array<Record<string, unknown>>).map((photo) => this.normalizePhoto(photo, String(item.id)))
+            : undefined,
+        })),
+        total: Number(raw.total ?? items.length),
+        page: Number(raw.page ?? options.page ?? 1),
+        page_size: Number(raw.page_size ?? options.pageSize ?? 100),
+        total_pages: Number(raw.total_pages ?? 1),
+      };
     });
   }
 
@@ -176,74 +180,65 @@ export class SkySortApiClient {
         group_size: Number(raw.group_size ?? photos.length),
         stale_flag: Boolean(raw.stale_flag),
         stale_reason: (raw.stale_reason as string | null | undefined) ?? null,
-        photos: photos.map((item) => ({
-          photo_id: String(item.photo_id ?? item.id),
-          id: String(item.id ?? item.photo_id),
-          group_id: (item.group_id as string | null | undefined) ?? String(raw.id ?? groupId),
-          file_name: String(item.file_name ?? ""),
-          file_path: String(item.file_path ?? ""),
-          capture_time: (item.capture_time as string | null | undefined) ?? null,
-          thumb_url: (item.thumb_url as string | null | undefined) ?? null,
-          preview_url: (item.preview_url as string | null | undefined) ?? null,
-          rating: (item.rating as number | null | undefined) ?? null,
-          provisional_rating: (item.provisional_rating as number | null | undefined) ?? null,
-          selection_status: (item.selection_status as PhotoReviewItem["selection_status"]) ?? "normal",
-          evaluation_status: (item.evaluation_status as PhotoReviewItem["evaluation_status"]) ?? "provisional",
-          ai_reason: (item.ai_reason as string | null | undefined) ?? null,
-          pick_flag: Boolean(item.pick_flag),
-          best_cut_flag: Boolean(item.best_cut_flag),
-          reviewed_flag: Boolean(item.reviewed_flag),
-          user_override_flag: Boolean(item.user_override_flag),
-          stale_flag: Boolean(item.stale_flag),
-          stale_reason: (item.stale_reason as string | null | undefined) ?? null,
-          technical_score_total:
-            (item.technical_score_total as number | undefined) ??
-            ((item.technical as Record<string, unknown> | undefined)?.technical_score_total as number | undefined) ??
-            null,
-          semantic_score: (item.semantic_score as number | undefined) ?? null,
-          composition_score: (item.composition_score as number | undefined) ?? null,
-          subject_state_score: (item.subject_state_score as number | undefined) ?? null,
-          rarity_score: (item.rarity_score as number | undefined) ?? null,
-        })),
+        photos: photos.map((item) => this.normalizePhoto(item, String(raw.id ?? groupId))),
       };
     });
   }
 
-  listPhotos(jobId: string) {
-    return this.request<Record<string, unknown>>(`/photos?job_id=${encodeURIComponent(jobId)}`).then((raw) => ({
+  listPhotos(jobId: string, options: { includeMissing?: boolean; filter?: Record<string, unknown>; page?: number; pageSize?: number } = {}) {
+    const params = new URLSearchParams({ job_id: jobId });
+    if (options.includeMissing) {
+      params.set("include_missing", "true");
+    }
+    if (options.filter && Object.keys(options.filter).length) {
+      params.set("filter", JSON.stringify(options.filter));
+    }
+    params.set("page", String(options.page ?? 1));
+    params.set("page_size", String(options.pageSize ?? 100));
+    return this.request<Record<string, unknown>>(`/photos?${params.toString()}`).then((raw) => ({
       items: Array.isArray(raw.items)
-        ? (raw.items as Array<Record<string, unknown>>).map((item) => ({
-            photo_id: String(item.photo_id ?? item.id),
-            id: String(item.id ?? item.photo_id),
-            group_id: (item.group_id as string | null | undefined) ?? null,
-            file_name: String(item.file_name ?? ""),
-            file_path: String(item.file_path ?? ""),
-            capture_time: (item.capture_time as string | null | undefined) ?? null,
-            thumb_url: (item.thumb_url as string | null | undefined) ?? null,
-            preview_url: (item.preview_url as string | null | undefined) ?? null,
-            rating: (item.rating as number | null | undefined) ?? null,
-            provisional_rating: (item.provisional_rating as number | null | undefined) ?? null,
-            selection_status: (item.selection_status as PhotoReviewItem["selection_status"]) ?? "normal",
-            evaluation_status: (item.evaluation_status as PhotoReviewItem["evaluation_status"]) ?? "provisional",
-            ai_reason: (item.ai_reason as string | null | undefined) ?? null,
-            pick_flag: Boolean(item.pick_flag),
-            best_cut_flag: Boolean(item.best_cut_flag),
-            reviewed_flag: Boolean(item.reviewed_flag),
-            user_override_flag: Boolean(item.user_override_flag),
-            stale_flag: Boolean(item.stale_flag),
-            stale_reason: (item.stale_reason as string | null | undefined) ?? null,
-            technical_score_total:
-              (item.technical_score_total as number | undefined) ??
-              ((item.technical as Record<string, unknown> | undefined)?.technical_score_total as number | undefined) ??
-              null,
-            semantic_score: (item.semantic_score as number | undefined) ?? null,
-            composition_score: (item.composition_score as number | undefined) ?? null,
-            subject_state_score: (item.subject_state_score as number | undefined) ?? null,
-            rarity_score: (item.rarity_score as number | undefined) ?? null,
-          }))
+        ? (raw.items as Array<Record<string, unknown>>).map((item) => this.normalizePhoto(item))
         : [],
       total: Number(raw.total ?? 0),
+      page: Number(raw.page ?? options.page ?? 1),
+      page_size: Number(raw.page_size ?? options.pageSize ?? 100),
+      total_pages: Number(raw.total_pages ?? 1),
     }));
+  }
+
+  private normalizePhoto(item: Record<string, unknown>, fallbackGroupId: string | null = null): PhotoReviewItem {
+    return {
+      photo_id: String(item.photo_id ?? item.id),
+      id: String(item.id ?? item.photo_id),
+      group_id: (item.group_id as string | null | undefined) ?? fallbackGroupId,
+      file_name: String(item.file_name ?? ""),
+      file_path: String(item.file_path ?? ""),
+      capture_time: (item.capture_time as string | null | undefined) ?? null,
+      camera_model: (item.camera_model as string | null | undefined) ?? null,
+      lens_model: (item.lens_model as string | null | undefined) ?? null,
+      thumb_url: (item.thumb_url as string | null | undefined) ?? null,
+      preview_url: (item.preview_url as string | null | undefined) ?? null,
+      is_missing: Boolean(item.is_missing),
+      rating: (item.rating as number | null | undefined) ?? null,
+      provisional_rating: (item.provisional_rating as number | null | undefined) ?? null,
+      selection_status: (item.selection_status as PhotoReviewItem["selection_status"]) ?? "normal",
+      evaluation_status: (item.evaluation_status as PhotoReviewItem["evaluation_status"]) ?? "provisional",
+      ai_reason: (item.ai_reason as string | null | undefined) ?? null,
+      pick_flag: Boolean(item.pick_flag),
+      best_cut_flag: Boolean(item.best_cut_flag),
+      reviewed_flag: Boolean(item.reviewed_flag),
+      user_override_flag: Boolean(item.user_override_flag),
+      stale_flag: Boolean(item.stale_flag),
+      stale_reason: (item.stale_reason as string | null | undefined) ?? null,
+      technical_score_total:
+        (item.technical_score_total as number | undefined) ??
+        ((item.technical as Record<string, unknown> | undefined)?.technical_score_total as number | undefined) ??
+        null,
+      semantic_score: (item.semantic_score as number | undefined) ?? null,
+      composition_score: (item.composition_score as number | undefined) ?? null,
+      subject_state_score: (item.subject_state_score as number | undefined) ?? null,
+      rarity_score: (item.rarity_score as number | undefined) ?? null,
+    };
   }
 
   updatePhoto(photoId: string, payload: PhotoMutationRequest) {
@@ -269,6 +264,20 @@ export class SkySortApiClient {
 
   reanalyzeGroup(groupId: string, payload: ReanalyzeRequest) {
     return this.request<{ accepted: boolean }>(`/groups/${groupId}/reanalyze`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  mergeGroup(groupId: string, payload: GroupMergeRequest) {
+    return this.request<Record<string, unknown>>(`/groups/${groupId}/merge`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  splitGroup(groupId: string, payload: GroupSplitRequest) {
+    return this.request<Record<string, unknown>>(`/groups/${groupId}/split`, {
       method: "POST",
       body: JSON.stringify(payload),
     });

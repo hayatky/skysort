@@ -176,6 +176,56 @@
         }
       }
     },
+    "/api/jobs/{job_id}/failures/{failure_id}/retry": {
+      "post": {
+        "summary": "Retry Failure",
+        "operationId": "retry_failure_api_jobs__job_id__failures__failure_id__retry_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "failure_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Failure Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Retry Failure Api Jobs  Job Id  Failures  Failure Id  Retry Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ai/health": {
       "get": {
         "summary": "Get Ai Health",
@@ -206,6 +256,55 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filter"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "created_at",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Page Size"
             }
           }
         ],
@@ -276,6 +375,108 @@
         }
       }
     },
+    "/api/groups/{group_id}/merge": {
+      "post": {
+        "summary": "Merge Group",
+        "operationId": "merge_group_api_groups__group_id__merge_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupMergeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Merge Group Api Groups  Group Id  Merge Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/groups/{group_id}/split": {
+      "post": {
+        "summary": "Split Group",
+        "operationId": "split_group_api_groups__group_id__split_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupSplitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Split Group Api Groups  Group Id  Split Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/photos": {
       "get": {
         "summary": "List Photos",
@@ -288,6 +489,55 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "include_missing",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Missing"
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filter"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Page Size"
             }
           }
         ],
@@ -829,6 +1079,10 @@
           },
           "format": {
             "type": "string",
+            "enum": [
+              "csv",
+              "json"
+            ],
             "title": "Format"
           },
           "filters": {
@@ -843,6 +1097,59 @@
           "format"
         ],
         "title": "ExportResultsRequest"
+      },
+      "GroupMergeRequest": {
+        "properties": {
+          "target_group_id": {
+            "type": "string",
+            "title": "Target Group Id"
+          },
+          "stale_policy": {
+            "type": "string",
+            "const": "mark_stale",
+            "title": "Stale Policy",
+            "default": "mark_stale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_group_id"
+        ],
+        "title": "GroupMergeRequest"
+      },
+      "GroupSplitRequest": {
+        "properties": {
+          "photo_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Photo Ids"
+          },
+          "new_group_rule": {
+            "type": "string",
+            "const": "selected_to_new_group",
+            "title": "New Group Rule",
+            "default": "selected_to_new_group"
+          },
+          "stale_policy": {
+            "type": "string",
+            "const": "mark_stale",
+            "title": "Stale Policy",
+            "default": "mark_stale"
+          },
+          "best_cut_policy": {
+            "type": "string",
+            "const": "clear",
+            "title": "Best Cut Policy",
+            "default": "clear"
+          }
+        },
+        "type": "object",
+        "required": [
+          "photo_ids"
+        ],
+        "title": "GroupSplitRequest"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1645,6 +1952,11 @@
             "type": "array",
             "title": "Photo Ids"
           },
+          "filters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Filters"
+          },
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
@@ -1652,6 +1964,11 @@
           },
           "conflict_policy": {
             "type": "string",
+            "enum": [
+              "skip",
+              "fail",
+              "overwrite_safe_fields"
+            ],
             "title": "Conflict Policy",
             "default": "skip"
           }

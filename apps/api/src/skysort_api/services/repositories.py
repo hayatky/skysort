@@ -160,3 +160,6 @@ class FailureRepository:
     def list_for_job(self, job_id: str) -> list[JobFailure]:
         stmt = select(JobFailure).where(JobFailure.job_id == job_id).order_by(JobFailure.created_at.desc())
         return list(self.session.scalars(stmt))
+
+    def get(self, failure_id: str) -> JobFailure | None:
+        return self.session.get(JobFailure, failure_id)

@@ -8,3 +8,18 @@
 - 機体の収まり
 - 構図
 - ブレやピントの印象
+
+必須JSON形式:
+{
+  "schema_version": "v1",
+  "ranking": [
+    {
+      "photo_id": "{{ photo_id }}",
+      "semantic_score": 0,
+      "composition_score": 0,
+      "subject_state_score": 0,
+      "rarity_score": 0,
+      "reason": "短い根拠"
+    }
+  ]
+}

@@ -89,8 +89,11 @@ export interface PhotoReviewItem extends ScoreSummary {
   file_name: string;
   file_path: string;
   capture_time?: string | null;
+  camera_model?: string | null;
+  lens_model?: string | null;
   thumb_url?: string | null;
   preview_url?: string | null;
+  is_missing: boolean;
   provisional_rating?: number | null;
   provisional_selection_status?: SelectionStatus | null;
   rating?: number | null;
@@ -109,9 +112,20 @@ export interface GroupDetail extends GroupListItem {
   photos: PhotoReviewItem[];
 }
 
+export interface GroupListResponse {
+  items: GroupListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 export interface PhotoListResponse {
   items: PhotoReviewItem[];
   total: number;
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
 }
 
 export interface PhotoMutationRequest {
@@ -140,12 +154,28 @@ export interface ReanalyzeRequest {
   scope: ReanalyzeScope;
 }
 
+export interface GroupMergeRequest {
+  target_group_id: string;
+  stale_policy?: "mark_stale";
+}
+
+export interface GroupSplitRequest {
+  photo_ids: string[];
+  new_group_rule?: "selected_to_new_group";
+  stale_policy?: "mark_stale";
+  best_cut_policy?: "clear";
+}
+
 export interface FailureItem {
+  id?: string;
   photo_id?: string | null;
   group_id?: string | null;
+  file_name?: string | null;
   stage: string;
+  reason_code?: string;
   reason: string;
   retryable: boolean;
+  retry_scope?: ReanalyzeScope;
 }
 
 export interface FailureListResponse {
@@ -168,6 +198,7 @@ export interface ExportResultsResponse {
 export interface XmpExportRequest {
   job_id: string;
   photo_ids?: string[];
+  filters?: Record<string, unknown>;
   dry_run?: boolean;
   conflict_policy?: "skip" | "fail" | "overwrite_safe_fields";
 }

@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import type { ReanalyzeScope } from "@skysort/client";
 
 import { Hero } from "@/components/hero";
 import { Panel } from "@/components/panel";
 import { PhotoCard } from "@/components/photo-card";
 import { useGroup } from "@/features/groups/use-groups";
-import { usePhotoMutation, useReanalyzeGroup, useReanalyzePhoto } from "@/features/review/use-review-actions";
+import { usePhotoMutation, useReanalyzeGroup, useReanalyzePhoto, useSplitGroup } from "@/features/review/use-review-actions";
 import { useJobId } from "@/hooks/use-job-id";
 import { useReviewShortcuts } from "@/hooks/use-review-shortcuts";
 
@@ -16,8 +17,10 @@ export function GroupDetailRoute() {
   const mutate = usePhotoMutation(jobId);
   const reanalyzeGroup = useReanalyzeGroup(jobId);
   const reanalyzePhoto = useReanalyzePhoto(jobId);
+  const splitGroup = useSplitGroup(jobId);
   const [index, setIndex] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  const [reanalyzeScope, setReanalyzeScope] = useState<ReanalyzeScope>("full");
   const selected = group.data?.photos[index];
 
   useReviewShortcuts({
@@ -39,11 +42,17 @@ export function GroupDetailRoute() {
         <button type="button" onClick={() => selected && mutate.mutate({ photoId: selected.photo_id, pick_flag: !selected.pick_flag })}>Pick</button>
         <button type="button" onClick={() => selected && mutate.mutate({ photoId: selected.photo_id, best_cut_flag: !selected.best_cut_flag })}>Best Cut</button>
         <button type="button" onClick={() => selected && mutate.mutate({ photoId: selected.photo_id, reviewed_flag: !selected.reviewed_flag })}>Reviewed</button>
-        <button type="button" onClick={() => selected && reanalyzePhoto.mutate(selected.photo_id)}>Reanalyze Photo</button>
-        <button type="button" onClick={() => groupId && reanalyzeGroup.mutate(groupId)}>Reanalyze Group</button>
+        <select value={reanalyzeScope} onChange={(event) => setReanalyzeScope(event.target.value as ReanalyzeScope)}>
+          <option value="full">full</option>
+          <option value="technical_only">technical_only</option>
+          <option value="ai_only">ai_only</option>
+        </select>
+        <button type="button" onClick={() => selected && reanalyzePhoto.mutate({ photoId: selected.photo_id, scope: reanalyzeScope })}>Reanalyze Photo</button>
+        <button type="button" onClick={() => groupId && reanalyzeGroup.mutate({ groupId, scope: reanalyzeScope })}>Reanalyze Group</button>
+        <button type="button" onClick={() => selected && groupId && splitGroup.mutate({ groupId, photoIds: [selected.photo_id] })}>Split Selected</button>
       </div>
     ),
-    [groupId, mutate, reanalyzeGroup, reanalyzePhoto, selected],
+    [groupId, mutate, reanalyzeGroup, reanalyzePhoto, reanalyzeScope, selected, splitGroup],
   );
 
   return (
@@ -73,6 +82,9 @@ export function GroupDetailRoute() {
                 <span className="score-chip">Tech {selected.technical_score_total ?? "n/a"}</span>
                 <span className="score-chip">AI {selected.semantic_score ?? "n/a"}</span>
                 <span className="score-chip">Reviewed {selected.reviewed_flag ? "yes" : "no"}</span>
+                {selected.is_missing ? <span className="score-chip">Missing</span> : null}
+                {selected.stale_flag ? <span className="score-chip">Stale {selected.stale_reason ?? "review required"}</span> : null}
+                {selected.evaluation_status === "ai_eval_failed" ? <span className="score-chip">AI Failed</span> : null}
               </div>
             ) : null}
           </Panel>

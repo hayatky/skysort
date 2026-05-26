@@ -1,0 +1,23 @@
+{
+  "schema_version": "v1",
+  "description": "Copy this file and fill it with human-selected benchmark expectations. Paths are relative to the imported root when possible.",
+  "groups": [
+    {
+      "name": "burst-001",
+      "match": {
+        "group_id": "group_example",
+        "relative_paths": [
+          "2026-03-26/DSC0001.jpg",
+          "2026-03-26/DSC0002.jpg"
+        ]
+      },
+      "expected_best": "2026-03-26/DSC0002.jpg",
+      "expected_reject": [
+        "2026-03-26/DSC0001.jpg"
+      ],
+      "expected_pick": [
+        "2026-03-26/DSC0002.jpg"
+      ]
+    }
+  ]
+}

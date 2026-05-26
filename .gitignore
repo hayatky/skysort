@@ -20,6 +20,7 @@ lerna-debug.log*
 dist/
 coverage/
 vite.svg
+apps/web/src/**/*.js
 
 # Python
 __pycache__/

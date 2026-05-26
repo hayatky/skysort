@@ -11,3 +11,15 @@ def test_grouping_keeps_similar_candidates_together() -> None:
     previous = PhotoCandidate("a", 0, 0, 0.1)
     current = PhotoCandidate("b", 2000, 1, 0.12)
     assert not should_start_new_group(previous, current, 5, 0.7)
+
+
+def test_grouping_similarity_backend_can_be_swapped_for_embedding_scores() -> None:
+    class EmbeddingBackend:
+        def score(self, _previous: PhotoCandidate, _current: PhotoCandidate) -> float:
+            return 0.95
+
+    previous = PhotoCandidate("a", 0, 0, 0.1)
+    current = PhotoCandidate("b", 2000, 1, 0.9)
+
+    assert should_start_new_group(previous, current, 5, 0.7)
+    assert not should_start_new_group(previous, current, 5, 0.7, similarity_backend=EmbeddingBackend())

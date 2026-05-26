@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from skysort_api.services.export_service import export_results as export_results_service
 from skysort_api.services.export_service import export_xmp as export_xmp_service
+from skysort_api.services.group_edit_service import merge_group as merge_group_service
+from skysort_api.services.group_edit_service import split_group as split_group_service
 from skysort_api.services.import_service import create_import_job
 from skysort_api.services.job_service import get_ai_health as get_ai_health_service
 from skysort_api.services.job_service import get_failures as get_failures_service
 from skysort_api.services.job_service import get_progress as get_progress_service
+from skysort_api.services.job_service import retry_failure as retry_failure_service
 from skysort_api.services.job_service import start_analysis
 from skysort_api.services.query_service import get_group as get_group_service
 from skysort_api.services.query_service import list_groups as list_groups_service
 from skysort_api.services.query_service import list_photos as list_photos_service
+from skysort_api.services.query_service import parse_filters as parse_filter_query_service
 from skysort_api.services.repositories import PhotoRepository
 from skysort_api.services.review_service import batch_mutate_photos
 from skysort_api.services.review_service import mutate_photo as mutate_photo_service
@@ -29,6 +34,8 @@ from .schemas import (
     AnalyzeRequest,
     BatchMutationRequest,
     ExportResultsRequest,
+    GroupMergeRequest,
+    GroupSplitRequest,
     ImportRequest,
     ImportResponse,
     JobProgressResponse,
@@ -67,14 +74,26 @@ def get_failures(job_id: str, session: Session = Depends(get_session)) -> dict[s
     return get_failures_service(session, job_id)
 
 
+@router.post("/jobs/{job_id}/failures/{failure_id}/retry")
+def retry_failure(job_id: str, failure_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+    return retry_failure_service(session, job_id, failure_id)
+
+
 @router.get("/ai/health", response_model=AIHealthResponse)
 def get_ai_health() -> AIHealthResponse:
     return AIHealthResponse(**get_ai_health_service().__dict__)
 
 
 @router.get("/groups")
-def list_groups(job_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
-    return list_groups_service(session, job_id)
+def list_groups(
+    job_id: str,
+    filter_query: Annotated[str | None, Query(alias="filter")] = None,
+    sort: str = "created_at",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return list_groups_service(session, job_id, filter_query=filter_query, sort=sort, page=page, page_size=page_size)
 
 
 @router.get("/groups/{group_id}")
@@ -82,9 +101,33 @@ def get_group(group_id: str, session: Session = Depends(get_session)) -> dict[st
     return get_group_service(session, group_id)
 
 
+@router.post("/groups/{group_id}/merge")
+def merge_group(group_id: str, payload: GroupMergeRequest, session: Session = Depends(get_session)) -> dict[str, object]:
+    return merge_group_service(session, group_id, payload)
+
+
+@router.post("/groups/{group_id}/split")
+def split_group(group_id: str, payload: GroupSplitRequest, session: Session = Depends(get_session)) -> dict[str, object]:
+    return split_group_service(session, group_id, payload)
+
+
 @router.get("/photos")
-def list_photos(job_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
-    return list_photos_service(session, job_id)
+def list_photos(
+    job_id: str,
+    include_missing: bool = False,
+    filter_query: Annotated[str | None, Query(alias="filter")] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return list_photos_service(
+        session,
+        job_id,
+        filters=parse_filter_query_service(filter_query),
+        include_missing=include_missing,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.patch("/photos/{photo_id}", response_model=MutationResult)

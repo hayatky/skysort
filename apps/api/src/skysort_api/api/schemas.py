@@ -88,16 +88,29 @@ class ReanalyzeRequest(BaseModel):
     scope: str = "full"
 
 
+class GroupMergeRequest(BaseModel):
+    target_group_id: str
+    stale_policy: Literal["mark_stale"] = "mark_stale"
+
+
+class GroupSplitRequest(BaseModel):
+    photo_ids: list[str]
+    new_group_rule: Literal["selected_to_new_group"] = "selected_to_new_group"
+    stale_policy: Literal["mark_stale"] = "mark_stale"
+    best_cut_policy: Literal["clear"] = "clear"
+
+
 class XmpExportRequest(BaseModel):
     job_id: str
     photo_ids: list[str] = Field(default_factory=list)
+    filters: dict[str, Any] = Field(default_factory=dict)
     dry_run: bool = True
-    conflict_policy: str = "skip"
+    conflict_policy: Literal["skip", "fail", "overwrite_safe_fields"] = "skip"
 
 
 class ExportResultsRequest(BaseModel):
     job_id: str
-    format: str
+    format: Literal["csv", "json"]
     filters: dict[str, Any] = Field(default_factory=dict)
 
 

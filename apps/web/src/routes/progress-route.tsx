@@ -5,6 +5,7 @@ import { Panel } from "@/components/panel";
 import { StatGrid } from "@/components/stat-grid";
 import { useAIHealth } from "@/features/import/use-import";
 import { useFailures, useProgress } from "@/features/progress/use-progress";
+import { useRetryFailure } from "@/features/review/use-review-actions";
 import { useJobId } from "@/hooks/use-job-id";
 
 export function ProgressRoute() {
@@ -12,6 +13,7 @@ export function ProgressRoute() {
   const progress = useProgress(jobId);
   const failures = useFailures(jobId);
   const health = useAIHealth();
+  const retryFailure = useRetryFailure(jobId);
 
   return (
     <>
@@ -56,9 +58,24 @@ export function ProgressRoute() {
         {failures.data?.items?.length ? (
           <div className="grid">
             {failures.data.items.map((item) => (
-              <div key={`${item.stage}-${item.reason}`} className="list-card">
+              <div key={`${item.stage}-${item.photo_id ?? item.group_id ?? item.reason}`} className="list-card">
                 <strong>{item.stage}</strong>
+                <p className="panel-copy">{item.file_name ?? item.photo_id ?? item.group_id ?? "job-level failure"}</p>
                 <p className="panel-copy">{item.reason}</p>
+                <div className="score-row">
+                  {item.photo_id ? <span className="score-chip">Photo {item.photo_id}</span> : null}
+                  {item.group_id ? <span className="score-chip">Group {item.group_id}</span> : null}
+                  {item.reason_code ? <span className="score-chip">Reason {item.reason_code}</span> : null}
+                  <span className="score-chip">Retryable {item.retryable ? "yes" : "no"}</span>
+                  {item.retry_scope ? <span className="score-chip">Scope {item.retry_scope}</span> : null}
+                </div>
+                {item.id && item.retryable ? (
+                  <div className="actions" style={{ marginTop: 12 }}>
+                    <button className="button secondary" type="button" onClick={() => retryFailure.mutate(item.id!)}>
+                      Retry Item
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

@@ -29,6 +29,9 @@ export function PhotoCard({
       <div className="score-row">
         <span className="score-chip">Tech {formatScore(photo.technical_score_total)}</span>
         <span className="score-chip">AI {formatScore(photo.semantic_score)}</span>
+        {photo.is_missing ? <span className="score-chip">Missing</span> : null}
+        {photo.stale_flag ? <span className="score-chip">Stale</span> : null}
+        {photo.evaluation_status === "ai_eval_failed" ? <span className="score-chip">AI Failed</span> : null}
         {photo.provisional_rating ? <span className="score-chip">Provisional {photo.provisional_rating}</span> : null}
         {photo.best_cut_flag ? <span className="score-chip">Best Cut</span> : null}
         {photo.pick_flag ? <span className="score-chip">Pick</span> : null}

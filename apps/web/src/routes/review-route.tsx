@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { ReanalyzeScope } from "@skysort/client";
 
 import { Hero } from "@/components/hero";
 import { Panel } from "@/components/panel";
@@ -12,35 +13,19 @@ import { useReviewShortcuts } from "@/hooks/use-review-shortcuts";
 
 export function ReviewRoute() {
   const jobId = useJobId();
-  const photos = usePhotos(jobId);
   const mutate = usePhotoMutation(jobId);
   const reanalyzePhoto = useReanalyzePhoto(jobId);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [reanalyzeScope, setReanalyzeScope] = useState<ReanalyzeScope>("full");
+  const [page, setPage] = useState(1);
   const parentRef = useRef<HTMLDivElement | null>(null);
-  const rawItems = photos.data?.items ?? [];
-  const items = useMemo(() => {
-    if (filter === "reject") {
-      return rawItems.filter((item) => item.selection_status === "rejected");
-    }
-    if (filter === "pending") {
-      return rawItems.filter((item) => !item.reviewed_flag);
-    }
-    if (filter === "pick") {
-      return rawItems.filter((item) => item.pick_flag);
-    }
-    if (filter === "best") {
-      return rawItems.filter((item) => item.best_cut_flag);
-    }
-    if (filter === "drop") {
-      return rawItems.filter((item) => item.rating === 1 || item.selection_status === "rejected");
-    }
-    if (filter.startsWith("star:")) {
-      const target = Number(filter.split(":")[1]);
-      return rawItems.filter((item) => item.rating === target);
-    }
-    return rawItems;
-  }, [filter, rawItems]);
+  const apiFilter = useMemo(() => withSearchAndDates(photoFilterPayload(filter), search, dateFrom, dateTo), [filter, search, dateFrom, dateTo]);
+  const photos = usePhotos(jobId, { filter: apiFilter, page, pageSize: 80 });
+  const items = photos.data?.items ?? [];
   const selected = items[selectedIndex];
   useEffect(() => {
     if (selectedIndex >= items.length) {
@@ -66,12 +51,32 @@ export function ReviewRoute() {
 
   const counts = useMemo(
     () => ({
-      picks: rawItems.filter((item) => item.pick_flag).length,
-      rejected: rawItems.filter((item) => item.selection_status === "rejected").length,
-      pending: rawItems.filter((item) => item.evaluation_status !== "final").length,
+      visible: items.length,
+      total: photos.data?.total ?? items.length,
     }),
-    [rawItems],
+    [items.length, photos.data?.total],
   );
+
+  const changeFilter = (nextFilter: string) => {
+    setFilter(nextFilter);
+    setSelectedIndex(0);
+    setPage(1);
+  };
+  const changeSearch = (nextSearch: string) => {
+    setSearch(nextSearch);
+    setSelectedIndex(0);
+    setPage(1);
+  };
+  const changeDateFrom = (nextDate: string) => {
+    setDateFrom(nextDate);
+    setSelectedIndex(0);
+    setPage(1);
+  };
+  const changeDateTo = (nextDate: string) => {
+    setDateTo(nextDate);
+    setSelectedIndex(0);
+    setPage(1);
+  };
 
   return (
     <>
@@ -81,22 +86,43 @@ export function ReviewRoute() {
         badge="Global Review"
         right={
           <>
-            <div className="pill">Picks {counts.picks}</div>
-            <div className="pill">Reject {counts.rejected}</div>
-            <div className="pill">Pending {counts.pending}</div>
+            <div className="pill">Visible {counts.visible}</div>
+            <div className="pill">Total {counts.total}</div>
           </>
         }
       />
       <Panel title="All Photos" copy={`${items.length} frames`}>
+        <div className="field-grid" style={{ marginBottom: 16 }}>
+          <div className="field">
+            <label htmlFor="review-search">Search</label>
+            <input
+              id="review-search"
+              value={search}
+              onChange={(event) => changeSearch(event.target.value)}
+              placeholder="filename, path, camera, lens, reason"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="review-date-from">From</label>
+            <input id="review-date-from" type="date" value={dateFrom} onChange={(event) => changeDateFrom(event.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="review-date-to">To</label>
+            <input id="review-date-to" type="date" value={dateTo} onChange={(event) => changeDateTo(event.target.value)} />
+          </div>
+        </div>
         <div className="actions" style={{ marginBottom: 16 }}>
-          <button className="button secondary" type="button" onClick={() => setFilter("all")}>All</button>
-          <button className="button secondary" type="button" onClick={() => setFilter("pending")}>Unreviewed</button>
-          <button className="button secondary" type="button" onClick={() => setFilter("reject")}>Reject</button>
-          <button className="button secondary" type="button" onClick={() => setFilter("drop")}>Delete Candidates</button>
-          <button className="button secondary" type="button" onClick={() => setFilter("pick")}>Pick</button>
-          <button className="button secondary" type="button" onClick={() => setFilter("best")}>Best Cut</button>
-          <button className="button secondary" type="button" onClick={() => setFilter("star:5")}>★5</button>
-          <button className="button secondary" type="button" onClick={() => setFilter("star:4")}>★4</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("all")}>All</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("pending")}>Unreviewed</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("reject")}>Reject</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("drop")}>Delete Candidates</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("pick")}>Pick</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("best")}>Best Cut</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("stale")}>Stale</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("missing")}>Missing</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("ai_failed")}>AI Failed</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("star:5")}>★5</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("star:4")}>★4</button>
         </div>
         {selected ? (
           <div className="actions" style={{ marginBottom: 16 }}>
@@ -107,7 +133,12 @@ export function ReviewRoute() {
             ) : null}
             <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, best_cut_flag: !selected.best_cut_flag })}>Toggle Best Cut</button>
             <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, reviewed_flag: !selected.reviewed_flag })}>Toggle Reviewed</button>
-            <button className="button secondary" type="button" onClick={() => reanalyzePhoto.mutate(selected.photo_id)}>Reanalyze Photo</button>
+            <select value={reanalyzeScope} onChange={(event) => setReanalyzeScope(event.target.value as ReanalyzeScope)}>
+              <option value="full">full</option>
+              <option value="technical_only">technical_only</option>
+              <option value="ai_only">ai_only</option>
+            </select>
+            <button className="button secondary" type="button" onClick={() => reanalyzePhoto.mutate({ photoId: selected.photo_id, scope: reanalyzeScope })}>Reanalyze Photo</button>
           </div>
         ) : null}
         <div ref={parentRef} className="virtual-list">
@@ -131,7 +162,35 @@ export function ReviewRoute() {
             })}
           </div>
         </div>
+        <div className="actions" style={{ marginTop: 16 }}>
+          <button className="button secondary" type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>
+          <span className="pill">Page {photos.data?.page ?? page} / {photos.data?.total_pages ?? 1}</span>
+          <button className="button secondary" type="button" disabled={page >= (photos.data?.total_pages ?? 1)} onClick={() => setPage((value) => value + 1)}>Next</button>
+        </div>
       </Panel>
     </>
   );
+}
+
+function photoFilterPayload(filter: string): Record<string, unknown> {
+  if (filter === "pending") return { reviewed: false };
+  if (filter === "reject") return { reject: true };
+  if (filter === "drop") return { delete_candidate: true };
+  if (filter === "pick") return { pick: true };
+  if (filter === "best") return { best: true };
+  if (filter === "stale") return { stale: true };
+  if (filter === "missing") return { is_missing: true };
+  if (filter === "ai_failed") return { evaluation_status: "ai_eval_failed" };
+  if (filter.startsWith("star:")) return { rating: Number(filter.split(":")[1]) };
+  return {};
+}
+
+function withSearchAndDates(filter: Record<string, unknown>, search: string, dateFrom: string, dateTo: string): Record<string, unknown> {
+  const query = search.trim();
+  return {
+    ...filter,
+    ...(query ? { q: query } : {}),
+    ...(dateFrom ? { date_from: `${dateFrom}T00:00:00+00:00` } : {}),
+    ...(dateTo ? { date_to: `${dateTo}T23:59:59+00:00` } : {}),
+  };
 }

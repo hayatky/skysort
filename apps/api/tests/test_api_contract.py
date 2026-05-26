@@ -25,3 +25,25 @@ def test_patch_photo_rejects_out_of_range_rating(isolated_runtime) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_export_xmp_rejects_unknown_conflict_policy(isolated_runtime) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/export/xmp",
+        json={"job_id": "job_123", "conflict_policy": "overwrite_all"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_export_results_rejects_unknown_format(isolated_runtime) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/export/results",
+        json={"job_id": "job_123", "format": "xlsx"},
+    )
+
+    assert response.status_code == 422

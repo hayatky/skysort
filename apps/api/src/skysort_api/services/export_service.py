@@ -23,7 +23,7 @@ from skysort_api.services.repositories import PhotoRepository
 
 
 def export_results(session, payload) -> dict[str, object]:
-    photos = list_photos(session, payload.job_id)["items"]
+    photos = list_photos(session, payload.job_id, filters=payload.filters)["items"]
     settings = get_settings()
     export_path = settings.tmp_dir / f"{payload.job_id}_results.{payload.format}"
     if payload.format == "json":
@@ -39,7 +39,7 @@ def export_results(session, payload) -> dict[str, object]:
 
 
 def export_xmp(session, payload) -> dict[str, object]:
-    photos = list_photos(session, payload.job_id)["items"]
+    photos = list_photos(session, payload.job_id, filters=payload.filters)["items"]
     target_items = [item for item in photos if not payload.photo_ids or item["photo_id"] in payload.photo_ids]
     write_candidates = []
     blocked_items = []
@@ -78,6 +78,18 @@ def export_xmp(session, payload) -> dict[str, object]:
             if payload.conflict_policy in {"skip", "fail"}:
                 continue
         write_candidates.append(enriched)
+
+    if conflicts and payload.conflict_policy == "fail" and not payload.dry_run:
+        return {
+            "target_count": len(target_items),
+            "written_count": 0,
+            "skipped_count": 0,
+            "failed_count": len(conflicts),
+            "written_items": [],
+            "skipped_items": [],
+            "failed_items": conflicts,
+            "conflicts": conflicts,
+        }
 
     available = exiftool_available()
     if payload.dry_run or not available:

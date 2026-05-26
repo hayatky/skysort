@@ -69,6 +69,9 @@ export function SettingsRoute() {
         badge="Settings"
       />
       <Panel title="Runtime Settings" copy="LM Studio 接続と評価閾値の最小構成">
+        <p className="panel-copy" style={{ marginBottom: 16 }}>
+          設定変更は既存ジョブへ後付け反映されません。新しい解析ジョブで snapshot され、既存結果は必要に応じて stale として再解析します。
+        </p>
         <div className="field-grid">
           <div className="field">
             <label htmlFor="ai_provider">ai_provider</label>

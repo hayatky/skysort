@@ -4,8 +4,8 @@ import { api } from "@/lib/api";
 
 export function useXmpExport() {
   return useMutation({
-    mutationFn: (payload: { jobId: string; dryRun: boolean }) =>
-      api.exportXmp({ job_id: payload.jobId, dry_run: payload.dryRun, conflict_policy: "skip" }),
+    mutationFn: (payload: { jobId: string; dryRun: boolean; conflictPolicy?: "skip" | "fail" | "overwrite_safe_fields" }) =>
+      api.exportXmp({ job_id: payload.jobId, dry_run: payload.dryRun, conflict_policy: payload.conflictPolicy ?? "skip" }),
   });
 }
 
