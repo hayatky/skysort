@@ -6,8 +6,10 @@ import { api } from "@/lib/api";
 export function usePhotoMutation(jobId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { photoId: string; rating?: number | null; selection_status?: "normal" | "rejected"; pick_flag?: boolean; best_cut_flag?: boolean; reviewed_flag?: boolean }) =>
-      api.updatePhoto(payload.photoId, { job_id: jobId, ...payload }),
+    mutationFn: (payload: { photoId: string; rating?: number | null; selection_status?: "normal" | "rejected"; pick_flag?: boolean; best_cut_flag?: boolean; reviewed_flag?: boolean }) => {
+      const { photoId, ...changes } = payload;
+      return api.updatePhoto(photoId, { job_id: jobId, ...changes });
+    },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["groups", jobId] }),

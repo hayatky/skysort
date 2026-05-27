@@ -5,6 +5,7 @@ import { Hero } from "@/components/hero";
 import { Panel } from "@/components/panel";
 import { StatGrid } from "@/components/stat-grid";
 import { useAIHealth, useImportJob } from "@/features/import/use-import";
+import { storeJobId } from "@/hooks/use-job-id";
 
 export function ImportRoute() {
   const navigate = useNavigate();
@@ -65,6 +66,7 @@ export function ImportRoute() {
                 reuseCache,
                 fileTypes: [".arw", ".jpg", ".jpeg", ".png"],
               });
+              storeJobId(response.job_id);
               navigate(`/progress?job=${response.job_id}`);
             }}
           >

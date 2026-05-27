@@ -74,6 +74,10 @@ class GroupRepository:
     def list_members(self, group_id: str) -> list[GroupMember]:
         return list(self.session.scalars(select(GroupMember).where(GroupMember.group_id == group_id).order_by(GroupMember.sort_order)))
 
+    def group_id_for_photo(self, photo_id: str) -> str | None:
+        stmt = select(GroupMember.group_id).where(GroupMember.photo_id == photo_id).order_by(GroupMember.created_at.desc())
+        return self.session.scalars(stmt).first()
+
 
 class EvaluationRepository:
     def __init__(self, session: Session) -> None:

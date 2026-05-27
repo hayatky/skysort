@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from skysort_api.api.schemas import MutationResult, PhotoMutationRequest, ReanalyzeRequest
 from skysort_api.infra.models import Group, PhotoEvaluation, RatingHistory
-from skysort_api.services.repositories import EvaluationRepository, GroupRepository
+from skysort_api.services.repositories import EvaluationRepository, GroupRepository, PhotoRepository
 from skysort_api.workers.job_runner import job_runner
 
 
@@ -16,7 +16,7 @@ def mutate_photo(session, photo_id: str, payload: PhotoMutationRequest) -> Mutat
     group_repo = GroupRepository(session)
     current = eval_repo.current_for_photo(photo_id, payload.job_id)
     if current is None:
-        raise HTTPException(status_code=404, detail="photo evaluation not found")
+        current = _base_evaluation_for_photo(session, group_repo, photo_id, payload.job_id)
 
     group = group_repo.get(current.group_id) if current.group_id else None
     rating = current.rating
@@ -161,6 +161,35 @@ def _select_group_best_photo_id(group_repo: GroupRepository, group: Group, evalu
 
     order = {member.photo_id: member.sort_order for member in group_repo.list_members(group.id)}
     return sorted(non_rejected, key=lambda item: order.get(item.photo_id, 10**9))[0].photo_id
+
+
+def _base_evaluation_for_photo(session, group_repo: GroupRepository, photo_id: str, job_id: str) -> PhotoEvaluation:
+    photo = PhotoRepository(session).get(photo_id)
+    if photo is None or photo.job_id != job_id:
+        raise HTTPException(status_code=404, detail="photo not found")
+    group_id = group_repo.group_id_for_photo(photo_id)
+    now = datetime.now(timezone.utc)
+    return PhotoEvaluation(
+        id=f"eval_{uuid.uuid4().hex[:10]}",
+        photo_id=photo_id,
+        job_id=job_id,
+        group_id=group_id,
+        provisional_rating=None,
+        provisional_selection_status="normal",
+        rating=None,
+        selection_status="normal",
+        evaluation_status="provisional",
+        pick_flag=False,
+        best_cut_flag=False,
+        reviewed_flag=False,
+        user_override_flag=False,
+        stale_flag=False,
+        stale_reason=None,
+        version=0,
+        is_current=False,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 def _clone_evaluation(current: PhotoEvaluation, **overrides) -> PhotoEvaluation:

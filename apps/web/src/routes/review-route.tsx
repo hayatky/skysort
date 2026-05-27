@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { ReanalyzeScope } from "@skysort/client";
+import type { PhotoReviewItem, ReanalyzeScope } from "@skysort/client";
 
 import { Hero } from "@/components/hero";
 import { Panel } from "@/components/panel";
-import { PhotoCard } from "@/components/photo-card";
 import { usePhotos } from "@/features/groups/use-groups";
 import { usePhotoMutation, useReanalyzePhoto } from "@/features/review/use-review-actions";
 import { useJobId } from "@/hooks/use-job-id";
 import { useReviewShortcuts } from "@/hooks/use-review-shortcuts";
+import { formatRating, formatScore } from "@/lib/format";
 
 export function ReviewRoute() {
   const jobId = useJobId();
@@ -35,9 +35,14 @@ export function ReviewRoute() {
   const rowVirtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 260,
-    overscan: 4,
+    estimateSize: () => 112,
+    overscan: 8,
   });
+  useEffect(() => {
+    if (items.length) {
+      rowVirtualizer.scrollToIndex(selectedIndex, { align: "auto" });
+    }
+  }, [items.length, rowVirtualizer, selectedIndex]);
 
   useReviewShortcuts({
     enabled: Boolean(selected),
@@ -111,7 +116,7 @@ export function ReviewRoute() {
             <input id="review-date-to" type="date" value={dateTo} onChange={(event) => changeDateTo(event.target.value)} />
           </div>
         </div>
-        <div className="actions" style={{ marginBottom: 16 }}>
+        <div className="actions filter-actions" style={{ marginBottom: 16 }}>
           <button className="button secondary" type="button" onClick={() => changeFilter("all")}>All</button>
           <button className="button secondary" type="button" onClick={() => changeFilter("pending")}>Unreviewed</button>
           <button className="button secondary" type="button" onClick={() => changeFilter("reject")}>Reject</button>
@@ -124,43 +129,78 @@ export function ReviewRoute() {
           <button className="button secondary" type="button" onClick={() => changeFilter("star:5")}>★5</button>
           <button className="button secondary" type="button" onClick={() => changeFilter("star:4")}>★4</button>
         </div>
-        {selected ? (
-          <div className="actions" style={{ marginBottom: 16 }}>
-            {selected.group_id ? (
-              <Link className="button secondary" to={`/groups/${selected.group_id}?job=${jobId}`}>
-                Open Group
-              </Link>
-            ) : null}
-            <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, best_cut_flag: !selected.best_cut_flag })}>Toggle Best Cut</button>
-            <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, reviewed_flag: !selected.reviewed_flag })}>Toggle Reviewed</button>
-            <select value={reanalyzeScope} onChange={(event) => setReanalyzeScope(event.target.value as ReanalyzeScope)}>
-              <option value="full">full</option>
-              <option value="technical_only">technical_only</option>
-              <option value="ai_only">ai_only</option>
-            </select>
-            <button className="button secondary" type="button" onClick={() => reanalyzePhoto.mutate({ photoId: selected.photo_id, scope: reanalyzeScope })}>Reanalyze Photo</button>
+        <div className="review-workspace">
+          <div ref={parentRef} className="virtual-list review-list">
+            <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const photo = items[virtualRow.index];
+                return (
+                  <div
+                    key={photo.photo_id}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <ReviewListRow photo={photo} active={photo.photo_id === selected?.photo_id} onSelect={() => setSelectedIndex(virtualRow.index)} />
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        ) : null}
-        <div ref={parentRef} className="virtual-list">
-          <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const photo = items[virtualRow.index];
-              return (
-                <div
-                  key={photo.photo_id}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                >
-                  <PhotoCard photo={photo} active={photo.photo_id === selected?.photo_id} onSelect={() => setSelectedIndex(virtualRow.index)} />
+          <aside className="review-preview">
+            {selected ? (
+              <>
+                {selected.preview_url ? <img src={selected.preview_url} alt={selected.file_name} /> : <div className="empty">No preview</div>}
+                <div>
+                  <h3>{selected.file_name}</h3>
+                  <p className="panel-copy">{selected.file_path}</p>
                 </div>
-              );
-            })}
-          </div>
+                <div className="score-row">
+                  <span className="score-chip">{formatRating(selected.rating, selected.selection_status)}</span>
+                  <span className="score-chip">Tech {formatScore(selected.technical_score_total)}</span>
+                  <span className="score-chip">AI {formatScore(selected.semantic_score)}</span>
+                  {selected.pick_flag ? <span className="score-chip">Pick</span> : null}
+                  {selected.best_cut_flag ? <span className="score-chip">Best Cut</span> : null}
+                  {selected.reviewed_flag ? <span className="score-chip">Reviewed</span> : null}
+                  {selected.stale_flag ? <span className="score-chip">Stale {selected.stale_reason ?? ""}</span> : null}
+                </div>
+                {selected.ai_reason ? <p className="panel-copy">{selected.ai_reason}</p> : null}
+                <div className="rating-controls" aria-label="Rating controls">
+                  {[1, 2, 3, 4, 5].map((rating) => (
+                    <button key={rating} type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, rating, selection_status: "normal" })}>
+                      ★{rating}
+                    </button>
+                  ))}
+                  <button type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, selection_status: "rejected", rating: null })}>Reject</button>
+                </div>
+                <div className="actions">
+                  {selected.group_id ? (
+                    <Link className="button secondary" to={`/groups/${selected.group_id}?job=${jobId}`}>
+                      Open Group
+                    </Link>
+                  ) : null}
+                  <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, pick_flag: !selected.pick_flag })}>Toggle Pick</button>
+                  <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, best_cut_flag: !selected.best_cut_flag })}>Toggle Best Cut</button>
+                  <button className="button secondary" type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, reviewed_flag: !selected.reviewed_flag })}>Toggle Reviewed</button>
+                </div>
+                <div className="actions">
+                  <select value={reanalyzeScope} onChange={(event) => setReanalyzeScope(event.target.value as ReanalyzeScope)}>
+                    <option value="full">full</option>
+                    <option value="technical_only">technical_only</option>
+                    <option value="ai_only">ai_only</option>
+                  </select>
+                  <button className="button secondary" type="button" onClick={() => reanalyzePhoto.mutate({ photoId: selected.photo_id, scope: reanalyzeScope })}>Reanalyze Photo</button>
+                </div>
+              </>
+            ) : (
+              <div className="empty">No photos match this filter.</div>
+            )}
+          </aside>
         </div>
         <div className="actions" style={{ marginTop: 16 }}>
           <button className="button secondary" type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>
@@ -169,6 +209,31 @@ export function ReviewRoute() {
         </div>
       </Panel>
     </>
+  );
+}
+
+function ReviewListRow({ photo, active, onSelect }: { photo: PhotoReviewItem; active: boolean; onSelect: () => void }) {
+  return (
+    <button type="button" className={`review-list-row${active ? " active" : ""}`} onClick={onSelect}>
+      {photo.thumb_url ? <img src={photo.thumb_url} alt={photo.file_name} /> : <div className="review-thumb-placeholder">No preview</div>}
+      <div className="review-row-main">
+        <div className="review-row-title">
+          <strong>{photo.file_name}</strong>
+          <span>{formatRating(photo.rating, photo.selection_status)}</span>
+        </div>
+        <div className="review-row-meta">
+          <span>Tech {formatScore(photo.technical_score_total)}</span>
+          <span>AI {formatScore(photo.semantic_score)}</span>
+          <span>{photo.evaluation_status}</span>
+          {photo.is_missing ? <span>Missing</span> : null}
+          {photo.stale_flag ? <span>Stale</span> : null}
+          {photo.pick_flag ? <span>Pick</span> : null}
+          {photo.best_cut_flag ? <span>Best Cut</span> : null}
+          {photo.reviewed_flag ? <span>Reviewed</span> : null}
+        </div>
+        <div className="review-row-path">{photo.file_path}</div>
+      </div>
+    </button>
   );
 }
 

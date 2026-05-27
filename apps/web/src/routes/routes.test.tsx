@@ -73,6 +73,7 @@ vi.mock("@/hooks/use-review-shortcuts", () => ({
 
 vi.mock("@/hooks/use-job-id", () => ({
   useJobId: () => "job_123",
+  getStoredJobId: () => "job_123",
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({

@@ -25,17 +25,22 @@ def list_groups(
     group_repo = GroupRepository(session)
     groups = JobRepository(session).list_groups(job_id)
     filters = parse_filters(filter_query)
+    if not filters and sort == "created_at":
+        total = len(groups)
+        start = (page - 1) * page_size
+        end = start + page_size
+        return {
+            "items": [_group_item_with_photos(photo_repo, eval_repo, group_repo, group) for group in groups[start:end]],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": ceil(total / page_size) if total else 0,
+            "sort": sort,
+            "filters": filters,
+        }
     results = []
     for group in groups:
-        members = group_repo.list_members(group.id)
-        photos = []
-        for member in members:
-            photo = photo_repo.get(member.photo_id)
-            evaluation = eval_repo.current_for_photo(member.photo_id, job_id)
-            technical = eval_repo.technical_for_photo(member.photo_id, job_id)
-            if photo and not photo.is_missing:
-                photos.append(photo_to_review_item(photo, evaluation, technical))
-        item = group_to_item(group, photos)
+        item = _group_item_with_photos(photo_repo, eval_repo, group_repo, group)
         if group_matches_filters(item, filters):
             results.append(item)
     results = sort_items(results, sort)
@@ -53,6 +58,22 @@ def list_groups(
     }
 
 
+def _group_item_with_photos(
+    photo_repo: PhotoRepository,
+    eval_repo: EvaluationRepository,
+    group_repo: GroupRepository,
+    group,
+) -> dict[str, object]:
+    photos = []
+    for member in group_repo.list_members(group.id):
+        photo = photo_repo.get(member.photo_id)
+        evaluation = eval_repo.current_for_photo(member.photo_id, group.job_id)
+        technical = eval_repo.technical_for_photo(member.photo_id, group.job_id)
+        if photo and not photo.is_missing:
+            photos.append(photo_to_review_item(photo, evaluation, technical, group.id))
+    return group_to_item(group, photos)
+
+
 def get_group(session, group_id: str) -> dict[str, object]:
     group_repo = GroupRepository(session)
     photo_repo = PhotoRepository(session)
@@ -67,7 +88,7 @@ def get_group(session, group_id: str) -> dict[str, object]:
         photo = photo_repo.get(member.photo_id)
         if photo is None or photo.is_missing:
             continue
-        photos.append(photo_to_review_item(photo, eval_repo.current_for_photo(photo.id, group.job_id), eval_repo.technical_for_photo(photo.id, group.job_id)))
+        photos.append(photo_to_review_item(photo, eval_repo.current_for_photo(photo.id, group.job_id), eval_repo.technical_for_photo(photo.id, group.job_id), group.id))
 
     result = group_to_item(group, photos)
     result["photos"] = photos
@@ -85,9 +106,11 @@ def list_photos(
 ) -> dict[str, object]:
     photo_repo = PhotoRepository(session)
     eval_repo = EvaluationRepository(session)
+    group_repo = GroupRepository(session)
+    photo_group_ids = _photo_group_ids(group_repo, job_id)
     items = []
     for photo in photo_repo.list_by_job(job_id, include_missing=include_missing):
-        item = photo_to_review_item(photo, eval_repo.current_for_photo(photo.id, job_id), eval_repo.technical_for_photo(photo.id, job_id))
+        item = photo_to_review_item(photo, eval_repo.current_for_photo(photo.id, job_id), eval_repo.technical_for_photo(photo.id, job_id), photo_group_ids.get(photo.id))
         if photo_matches_filters(item, filters or {}):
             items.append(item)
     total = len(items)
@@ -115,6 +138,14 @@ def parse_filters(filter_query: str | None) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=422, detail="filter must be a JSON object")
     return parsed
+
+
+def _photo_group_ids(group_repo: GroupRepository, job_id: str) -> dict[str, str]:
+    photo_group_ids: dict[str, str] = {}
+    for group in group_repo.list_by_job(job_id):
+        for member in group_repo.list_members(group.id):
+            photo_group_ids[member.photo_id] = group.id
+    return photo_group_ids
 
 
 def sort_items(items: list[dict[str, object]], sort: str) -> list[dict[str, object]]:

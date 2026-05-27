@@ -9,10 +9,15 @@ def isoformat(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-def photo_to_review_item(photo: Photo, evaluation: PhotoEvaluation | None, technical: TechnicalScore | None) -> dict[str, object]:
+def photo_to_review_item(
+    photo: Photo,
+    evaluation: PhotoEvaluation | None,
+    technical: TechnicalScore | None,
+    group_id: str | None = None,
+) -> dict[str, object]:
     return {
         "photo_id": photo.id,
-        "group_id": evaluation.group_id if evaluation else None,
+        "group_id": evaluation.group_id if evaluation and evaluation.group_id else group_id,
         "file_name": photo.file_name,
         "file_path": photo.file_path,
         "capture_time": isoformat(photo.capture_time),

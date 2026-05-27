@@ -123,3 +123,20 @@ def test_mutate_photo_updates_group_best_cut_and_recomputes_after_reject(db_sess
     assert repo.current_for_photo("photo_1", "job_review").best_cut_flag is True
     assert repo.current_for_photo("photo_2", "job_review").selection_status == "rejected"
     assert repo.current_for_photo("photo_2", "job_review").best_cut_flag is False
+
+
+def test_mutate_photo_creates_manual_evaluation_for_imported_photo(db_session) -> None:
+    db_session.add(_seed_job())
+    db_session.add(_seed_photo("photo_imported", 0))
+    db_session.flush()
+
+    result = mutate_photo(db_session, "photo_imported", PhotoMutationRequest(job_id="job_review", rating=4))
+    db_session.flush()
+
+    current = EvaluationRepository(db_session).current_for_photo("photo_imported", "job_review")
+    assert result.updated_count == 1
+    assert current is not None
+    assert current.rating == 4
+    assert current.selection_status == "normal"
+    assert current.user_override_flag is True
+    assert current.evaluation_status == "provisional"
