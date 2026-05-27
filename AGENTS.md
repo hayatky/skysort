@@ -1,13 +1,13 @@
 # skysort AGENTS.md
 
-このファイルは、本リポジトリで作業する AI コーディングエージェント向けの実務ガイドです。詳細要件の正本は [docs/plan.md](/Users/yuta/Git/skysort/docs/plan.md) であり、このファイルはその要点と実装判断ルールを短く整理したものです。
+このファイルは、本リポジトリで作業する AI コーディングエージェント向けの実務ガイドです。詳細要件の正本は [docs/plan.md](docs/plan.md) であり、このファイルはその要点と実装判断ルールを短く整理したものです。
 
 ## 1. 最初に読むもの
 
 作業開始時は、次の順で確認してください。
 
-1. [docs/plan.md](/Users/yuta/Git/skysort/docs/plan.md)
-2. [README.md](/Users/yuta/Git/skysort/README.md)
+1. [docs/plan.md](docs/plan.md)
+2. [README.md](README.md)
 3. 変更対象ディレクトリ配下の実装・テスト・設定ファイル
 
 実装判断で迷った場合は、`docs/plan.md` を優先してください。`AGENTS.md` と矛盾する場合も `docs/plan.md` を正とします。

@@ -1,6 +1,6 @@
 # SkySort
 
-SkySort is a local-first AI photo culling tool for aviation photographers. This repository now contains the Phase 1 MVP scaffold defined in [docs/plan.md](/Users/yuta/Git/skysort/docs/plan.md): import, preview generation, EXIF extraction, grouping, technical scoring, AI-assisted review, manual overrides, and dry-run-first XMP export.
+SkySort is a local-first AI photo culling tool for aviation photographers. This repository now contains the Phase 1 MVP scaffold defined in [docs/plan.md](docs/plan.md): import, preview generation, EXIF extraction, grouping, technical scoring, AI-assisted review, manual overrides, and dry-run-first XMP export.
 
 ## Repository Layout
 
@@ -42,7 +42,7 @@ export SKYSORT_AI_TITLE=SkySort
 ## Backend Setup
 
 ```bash
-cd /Users/yuta/Git/skysort
+cd /path/to/skysort
 uv sync --project apps/api
 uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
 ./scripts/dev-api.sh
@@ -75,7 +75,7 @@ Important runtime behavior:
 ## Frontend Setup
 
 ```bash
-cd /Users/yuta/Git/skysort
+cd /path/to/skysort
 pnpm install
 ./scripts/dev-web.sh
 ```
@@ -134,7 +134,7 @@ Keyboard shortcuts on review screens:
 Backend syntax / basic unit checks:
 
 ```bash
-cd /Users/yuta/Git/skysort
+cd /path/to/skysort
 uv run python -m compileall -q apps/api/src
 uv run --project apps/api pytest
 pnpm --filter @skysort/web test
@@ -147,7 +147,7 @@ The repository includes backend tests for import diffing, RAW preview selection,
 
 Frontend source under `apps/web/src` is TypeScript-only. The web build runs `tsc --noEmit` for type checking and emits browser assets only through Vite into `dist/`.
 
-Use [docs/acceptance-checklist.md](/Users/yuta/Git/skysort/docs/acceptance-checklist.md) for the current local acceptance gate before test operation.
+Use [docs/acceptance-checklist.md](docs/acceptance-checklist.md) for the current local acceptance gate before test operation.
 
 ## Benchmark Validation
 
@@ -159,7 +159,7 @@ Before production use, validate against a benchmark burst set with expected best
 4. Record mismatches with the group ID, expected outcome, actual outcome, and whether the issue came from grouping, technical scoring, or AI ranking.
 5. Re-run one unchanged benchmark folder and confirm that previews and unchanged evaluations are reused instead of being recomputed.
 
-Use [docs/benchmark-expectations.example.json](/Users/yuta/Git/skysort/docs/benchmark-expectations.example.json) as the expectation template. After exporting JSON results from `POST /api/export/results`, generate diff reports with:
+Use [docs/benchmark-expectations.example.json](docs/benchmark-expectations.example.json) as the expectation template. After exporting JSON results from `POST /api/export/results`, generate diff reports with:
 
 ```bash
 python scripts/benchmark_diff.py --expectations docs/benchmark-expectations.example.json --results var/tmp/example_results.json --root /path/to/import/root --output-dir var/tmp
