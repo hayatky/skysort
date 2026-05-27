@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Iterator, TypeVar
 
 from skysort_api.domain.evaluation import (
     SemanticMetrics,
@@ -212,37 +212,35 @@ def run_analysis(session, job_id: str, cancel_requested: Callable[[], bool] | No
             for photo in photos
         ]
         photos_by_id = {photo.id: photo for photo in photos}
-        for chunk in _chunked(preparation_tasks, settings_snapshot.image_processing_concurrency):
+        for task, result in _iter_with_concurrency(
+            preparation_tasks,
+            max_workers=settings_snapshot.image_processing_concurrency,
+            worker=_prepare_photo_from_task,
+        ):
             _raise_if_cancel_requested(session, job, cancel_requested)
-            for task, result in _map_with_concurrency(
-                chunk,
-                max_workers=settings_snapshot.image_processing_concurrency,
-                worker=_prepare_photo_from_task,
-            ):
-                _raise_if_cancel_requested(session, job, cancel_requested)
-                photo = photos_by_id[task.photo_id]
-                try:
-                    if isinstance(result, BaseException):
-                        raise result
-                    _apply_photo_preparation_result(photo, result)
-                    candidate_records.append(
-                        (
-                            photo,
-                            PhotoCandidate(
-                                photo_id=photo.id,
-                                capture_timestamp_ms=photo.capture_timestamp_ms,
-                                capture_order_index=photo.capture_order_index,
-                                similarity_seed=result.similarity_seed,
-                            ),
-                        )
+            photo = photos_by_id[task.photo_id]
+            try:
+                if isinstance(result, BaseException):
+                    raise result
+                _apply_photo_preparation_result(photo, result)
+                candidate_records.append(
+                    (
+                        photo,
+                        PhotoCandidate(
+                            photo_id=photo.id,
+                            capture_timestamp_ms=photo.capture_timestamp_ms,
+                            capture_order_index=photo.capture_order_index,
+                            similarity_seed=result.similarity_seed,
+                        ),
                     )
-                except Exception as exc:
-                    logger.exception("Preview/EXIF processing failed for %s", photo.file_path)
-                    _record_failure(session, job, failure_repo, "preview_exif", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("preview_exif", exc))
-                finally:
-                    job.imported_files = len(candidate_records)
-                    job.updated_at = datetime.now(timezone.utc)
-                    session.commit()
+                )
+            except Exception as exc:
+                logger.exception("Preview/EXIF processing failed for %s", photo.file_path)
+                _record_failure(session, job, failure_repo, "preview_exif", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("preview_exif", exc))
+            finally:
+                job.imported_files = len(candidate_records)
+                job.updated_at = datetime.now(timezone.utc)
+                session.commit()
 
         ordered_candidate_records = _sort_candidate_records(candidate_records)
         ordered_photos = [photo for photo, _ in ordered_candidate_records]
@@ -278,28 +276,26 @@ def run_analysis(session, job_id: str, cancel_requested: Callable[[], bool] | No
                 _refresh_progress_counts(job, eval_repo)
                 job.updated_at = datetime.now(timezone.utc)
                 session.commit()
-        for chunk in _chunked(photos_to_score, settings_snapshot.image_processing_concurrency):
+        for photo, result in _iter_with_concurrency(
+            photos_to_score,
+            max_workers=settings_snapshot.image_processing_concurrency,
+            worker=_compute_technical_score_result,
+        ):
             _raise_if_cancel_requested(session, job, cancel_requested)
-            for photo, result in _map_with_concurrency(
-                chunk,
-                max_workers=settings_snapshot.image_processing_concurrency,
-                worker=_compute_technical_score_result,
-            ):
-                _raise_if_cancel_requested(session, job, cancel_requested)
-                if photo.is_missing:
-                    continue
-                try:
-                    if isinstance(result, BaseException):
-                        raise result
-                    if photo.id not in reusable_photo_ids:
-                        _apply_technical_score_result(session, eval_repo, photo, job.id, result)
-                except Exception as exc:
-                    logger.exception("Technical scoring failed for %s", photo.file_path)
-                    _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("technical_scoring", exc))
-                finally:
-                    _refresh_progress_counts(job, eval_repo)
-                    job.updated_at = datetime.now(timezone.utc)
-                    session.commit()
+            if photo.is_missing:
+                continue
+            try:
+                if isinstance(result, BaseException):
+                    raise result
+                if photo.id not in reusable_photo_ids:
+                    _apply_technical_score_result(session, eval_repo, photo, job.id, result)
+            except Exception as exc:
+                logger.exception("Technical scoring failed for %s", photo.file_path)
+                _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("technical_scoring", exc))
+            finally:
+                _refresh_progress_counts(job, eval_repo)
+                job.updated_at = datetime.now(timezone.utc)
+                session.commit()
 
         _raise_if_cancel_requested(session, job, cancel_requested)
         job.current_stage = "semantically_scored"
@@ -421,6 +417,46 @@ def _map_with_concurrency(
             except BaseException as exc:
                 mapped.append((item, exc))
         return mapped
+
+
+def _iter_with_concurrency(
+    items: list[T],
+    *,
+    max_workers: int,
+    worker: Callable[[T], R],
+) -> Iterator[tuple[T, R | BaseException]]:
+    bounded_workers = max(1, min(max_workers, len(items))) if items else 1
+    if bounded_workers == 1:
+        for item in items:
+            try:
+                yield item, worker(item)
+            except BaseException as exc:
+                yield item, exc
+        return
+
+    iterator = iter(items)
+    max_pending = bounded_workers * 2
+    with ThreadPoolExecutor(max_workers=bounded_workers) as executor:
+        pending = {}
+
+        def submit_until_full() -> None:
+            while len(pending) < max_pending:
+                try:
+                    item = next(iterator)
+                except StopIteration:
+                    return
+                pending[executor.submit(worker, item)] = item
+
+        submit_until_full()
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                item = pending.pop(future)
+                try:
+                    yield item, future.result()
+                except BaseException as exc:
+                    yield item, exc
+            submit_until_full()
 
 
 def _build_photo_preparation_task(

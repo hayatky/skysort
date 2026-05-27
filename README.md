@@ -75,7 +75,7 @@ Important runtime behavior:
 - unchanged files reuse deterministic preview/thumbnail cache keys derived from path + hash + size + mtime
 - ARW preview generation prefers the embedded JPEG preview and falls back to `rawpy` demosaic only when needed
 - AI responses must include `schema_version` and the expected typed ranking/drop-candidate structure before values are applied
-- `image_processing_concurrency` controls preview, metadata, and technical-score workers; `ai_concurrency` controls single-image AI calls while DB writes remain serialized
+- `image_processing_concurrency` controls preview, metadata, and technical-score workers; it defaults to `min(16, os.cpu_count())` and `ai_concurrency` controls single-image AI calls while DB writes remain serialized
 
 Windows note:
 

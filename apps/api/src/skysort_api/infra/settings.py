@@ -34,6 +34,10 @@ class RatingThresholds(BaseModel):
     reject: float = 20.0
 
 
+def default_image_processing_concurrency() -> int:
+    return max(2, min(16, os.cpu_count() or 2))
+
+
 class RuntimeSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SKYSORT_", extra="ignore")
 
@@ -49,7 +53,7 @@ class RuntimeSettings(BaseSettings):
     allow_remote_ai: bool = False
     ai_timeout_seconds: float = 10.0
     ai_concurrency: int = 1
-    image_processing_concurrency: int = 2
+    image_processing_concurrency: int = Field(default_factory=default_image_processing_concurrency)
     thumb_size: int = 512
     thumbnail_size: int = 512
     preview_size: int = 1024

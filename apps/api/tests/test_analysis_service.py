@@ -6,9 +6,11 @@ from threading import Lock
 
 from skysort_api.domain.grouping import PhotoCandidate
 from skysort_api.infra.models import Photo, TechnicalScore
+from skysort_api.infra.settings import default_image_processing_concurrency
 from skysort_api.services.analysis_service import (
     MetadataExtractionError,
     PreviewGenerationError,
+    _iter_with_concurrency,
     _map_with_concurrency,
     _reason_code_for_exception,
     _select_ai_candidate_pool,
@@ -130,7 +132,34 @@ def test_map_with_concurrency_clamps_invalid_worker_count_to_sequential() -> Non
     assert results == [(1, 2), (2, 3)]
 
 
+def test_iter_with_concurrency_streams_work_with_bounded_parallelism() -> None:
+    lock = Lock()
+    active = 0
+    max_active = 0
+
+    def worker(value: int) -> int:
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return value * 10
+
+    results = list(_iter_with_concurrency([1, 2, 3, 4, 5, 6], max_workers=3, worker=worker))
+
+    assert sorted(results) == [(1, 10), (2, 20), (3, 30), (4, 40), (5, 50), (6, 60)]
+    assert max_active == 3
+
+
 def test_failure_reason_codes_distinguish_retry_categories() -> None:
     assert _reason_code_for_exception("preview_exif", PreviewGenerationError("preview failed")) == "preview_generation_failed"
     assert _reason_code_for_exception("preview_exif", MetadataExtractionError("exif failed")) == "metadata_extraction_failed"
     assert _reason_code_for_exception("semantically_scored", TimeoutError("timed out")) == "ai_timeout"
+
+
+def test_default_image_processing_concurrency_scales_with_available_cpu(monkeypatch) -> None:
+    monkeypatch.setattr("os.cpu_count", lambda: 32)
+
+    assert default_image_processing_concurrency() == 16
