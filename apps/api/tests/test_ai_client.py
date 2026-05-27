@@ -34,6 +34,8 @@ class _FakeHTTPXClient:
     def post(self, path: str, json):
         assert path == "/chat/completions"
         assert json["model"] == "openai/gpt-5-nano"
+        assert json["response_format"]["type"] == "json_schema"
+        assert json["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
         return _FakeResponse({"choices": [{"message": {"content": '{"ok": true}'}}]})
 
 

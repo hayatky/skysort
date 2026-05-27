@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from skysort_api.infra.database import session_scope
+from skysort_api.infra.models import Job
 from skysort_api.infra.file_scan import normalize_root_path
 from skysort_api.services.import_service import create_import_job
 from skysort_api.services.repositories import PhotoRepository
@@ -62,6 +64,21 @@ def test_create_import_job_reuses_unchanged_metadata_and_marks_missing(db_sessio
 
     assert second_by_name["charlie.jpg"].is_missing is True
     assert second_by_name["delta.jpg"].is_missing is False
+
+
+def test_create_import_job_commits_job_before_return(isolated_runtime, tmp_path: Path) -> None:
+    root = tmp_path / "photos"
+    root.mkdir()
+    _write_jpeg(root / "alpha.jpg", (255, 0, 0))
+
+    with session_scope() as import_session:
+        job_id, count = create_import_job(import_session, str(root), True, [".jpg"], True)
+        with session_scope() as read_session:
+            persisted = read_session.get(Job, job_id)
+
+    assert count == 1
+    assert persisted is not None
+    assert persisted.id == job_id
 
 
 def test_normalize_root_path_handles_spaces_japanese_relative_and_symlink(tmp_path: Path, monkeypatch) -> None:

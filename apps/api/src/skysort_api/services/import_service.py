@@ -92,6 +92,7 @@ def create_import_job(session, root_path: str, recursive: bool, file_types: list
 
     job_repo.add(job)
     photo_repo.add_many(photos)
+    session.commit()
     return job_id, len(photos)
 
 

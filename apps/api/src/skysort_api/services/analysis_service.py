@@ -17,7 +17,7 @@ from skysort_api.domain.evaluation import (
     provisional_rating_from_technical,
 )
 from skysort_api.domain.grouping import PhotoCandidate, should_start_new_group
-from skysort_api.infra.ai_client import AIResult, VisionLanguageModelClient
+from skysort_api.infra.ai_client import AIResult, VisionLanguageModelClient, json_schema_response_format
 from skysort_api.infra.file_scan import build_source_signature
 from skysort_api.infra.image_tools import (
     build_data_url,
@@ -35,6 +35,57 @@ from .repositories import EvaluationRepository, FailureRepository, GroupReposito
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 R = TypeVar("R")
+
+SINGLE_IMAGE_RESPONSE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "string"},
+        "ranking": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "photo_id": {"type": "string"},
+                    "semantic_score": {"type": "number"},
+                    "composition_score": {"type": "number"},
+                    "subject_state_score": {"type": "number"},
+                    "rarity_score": {"type": "number"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["photo_id", "semantic_score", "composition_score", "subject_state_score", "rarity_score", "reason"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["schema_version", "ranking"],
+    "additionalProperties": False,
+}
+
+GROUP_COMPARE_RESPONSE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "string"},
+        "best_photo_id": {"type": "string"},
+        "ranking": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "photo_id": {"type": "string"},
+                    "rank": {"type": "integer"},
+                    "semantic_score": {"type": "number"},
+                    "rarity_score": {"type": "number"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["photo_id", "rank", "semantic_score", "rarity_score", "reason"],
+                "additionalProperties": False,
+            },
+        },
+        "drop_candidates": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["schema_version", "best_photo_id", "ranking", "drop_candidates"],
+    "additionalProperties": False,
+}
 
 
 @dataclass(slots=True)
@@ -648,7 +699,7 @@ def _build_single_photo_ai_task(
     content = prompt.replace("{{ photo_id }}", photo.id).replace("{{ technical_score_total }}", str(technical.technical_score_total if technical else 0)).replace("{{ capture_time }}", photo.capture_time.isoformat() if photo.capture_time else "")
     payload = {
         "model": get_settings().ai_model_name,
-        "response_format": {"type": "json_object"},
+        "response_format": json_schema_response_format("single_image_review", SINGLE_IMAGE_RESPONSE_SCHEMA),
         "messages": [
             {
                 "role": "user",
@@ -777,7 +828,7 @@ def _compare_chunk(
         )
     payload = {
         "model": get_settings().ai_model_name,
-        "response_format": {"type": "json_object"},
+        "response_format": json_schema_response_format("group_compare_review", GROUP_COMPARE_RESPONSE_SCHEMA),
         "messages": [{"role": "user", "content": content}],
     }
     response = ai_client.evaluate("group_compare", payload)

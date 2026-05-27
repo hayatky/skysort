@@ -12,9 +12,25 @@ from .settings import get_settings
 
 
 TINY_IMAGE_DATA_URL = (
-    "data:image/png;base64,"
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WmIWKAAAAAASUVORK5CYII="
+    "data:image/jpeg;base64,"
+    "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4R"
+    "DgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF"
+    "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAAQABADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAA"
+    "ECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2"
+    "JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJ"
+    "WWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAH"
+    "wEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdh"
+    "cRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hp"
+    "anN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk"
+    "5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9U6KKKAP/2Q=="
 )
+
+HEALTH_RESPONSE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {"ok": {"type": "boolean"}},
+    "required": ["ok"],
+    "additionalProperties": False,
+}
 
 
 @dataclass(slots=True)
@@ -96,7 +112,7 @@ class VisionLanguageModelClient:
                 configured_exists = self.settings.ai_model_name in models if models else True
                 probe_payload = {
                     "model": self.settings.ai_model_name,
-                    "response_format": {"type": "json_object"},
+                    "response_format": json_schema_response_format("health_probe", HEALTH_RESPONSE_SCHEMA),
                     "messages": [
                         {
                             "role": "user",
@@ -127,6 +143,23 @@ class VisionLanguageModelClient:
                 structured_json_capable=json_capable,
                 checked_at=checked_at,
                 error_detail=None if json_capable else "Vision or JSON probe failed",
+            )
+        except httpx.HTTPStatusError as exc:
+            error_detail = _format_http_error(exc)
+            return AIHealthResult(
+                provider=self.settings.ai_provider,
+                reachable=False,
+                localhost_only=localhost_only,
+                remote_allowed=self.settings.allow_remote_ai,
+                auth_configured=auth_configured,
+                available_models=[],
+                configured_model=self.settings.ai_model_name,
+                configured_model_exists=False,
+                model_loadable=False,
+                vision_capable=False,
+                structured_json_capable=False,
+                checked_at=checked_at,
+                error_detail=error_detail,
             )
         except Exception as exc:
             return AIHealthResult(
@@ -194,6 +227,17 @@ def _recover_json(raw_text: str) -> dict[str, object] | None:
         except json.JSONDecodeError:
             continue
     return None
+
+
+def json_schema_response_format(name: str, schema: dict[str, object]) -> dict[str, object]:
+    return {"type": "json_schema", "json_schema": {"name": name, "schema": schema}}
+
+
+def _format_http_error(exc: httpx.HTTPStatusError) -> str:
+    detail = exc.response.text.strip()
+    if detail:
+        return f"{exc}; response body: {detail}"
+    return str(exc)
 
 
 def _extract_json(raw_text: str) -> str | None:
