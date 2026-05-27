@@ -89,7 +89,7 @@ pnpm install
 pnpm dev:web
 ```
 
-The Vite dev server runs on `http://127.0.0.1:5173` and proxies `/api` to the backend on port `8000`.
+The Vite dev server accepts both `http://127.0.0.1:5173` and `http://localhost:5173`, and proxies `/api` to the backend on port `8000`.
 
 ## Phase 1 Implemented Surfaces
 
