@@ -16,7 +16,13 @@ from skysort_api.services.import_service import create_import_job
 from skysort_api.services.job_service import get_ai_health as get_ai_health_service
 from skysort_api.services.job_service import get_failures as get_failures_service
 from skysort_api.services.job_service import get_progress as get_progress_service
+from skysort_api.services.job_service import get_project as get_project_service
+from skysort_api.services.job_service import list_project_jobs as list_project_jobs_service
+from skysort_api.services.job_service import list_projects as list_projects_service
+from skysort_api.services.job_service import request_cancel as request_cancel_service
+from skysort_api.services.job_service import retry_job as retry_job_service
 from skysort_api.services.job_service import retry_failure as retry_failure_service
+from skysort_api.services.job_service import start_project_analysis as start_project_analysis_service
 from skysort_api.services.job_service import start_analysis
 from skysort_api.services.query_service import get_group as get_group_service
 from skysort_api.services.query_service import list_groups as list_groups_service
@@ -40,6 +46,8 @@ from .schemas import (
     ImportRequest,
     ImportResponse,
     JobProgressResponse,
+    ProjectListResponse,
+    ProjectResponse,
     MutationResult,
     PhotoMutationRequest,
     ReanalyzeRequest,
@@ -54,10 +62,30 @@ router = APIRouter(prefix="/api")
 @router.post("/import", response_model=ImportResponse)
 def import_folder(payload: ImportRequest, session: Session = Depends(get_session)) -> ImportResponse:
     try:
-        job_id, count = create_import_job(session, payload.root_path, payload.recursive, payload.file_types, payload.reuse_cache)
+        project_id, job_id, count = create_import_job(session, payload.root_path, payload.recursive, payload.file_types, payload.reuse_cache)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ImportResponse(job_id=job_id, registered_count=count)
+    return ImportResponse(project_id=project_id, job_id=job_id, registered_count=count)
+
+
+@router.get("/projects", response_model=ProjectListResponse)
+def list_projects(limit: int = Query(default=50, ge=1, le=200), session: Session = Depends(get_session)) -> dict[str, object]:
+    return list_projects_service(session, limit=limit)
+
+
+@router.get("/projects/{project_id}", response_model=ProjectResponse)
+def get_project(project_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+    return get_project_service(session, project_id)
+
+
+@router.get("/projects/{project_id}/jobs")
+def list_project_jobs(project_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+    return list_project_jobs_service(session, project_id)
+
+
+@router.post("/projects/{project_id}/analyze")
+def analyze_project(project_id: str, payload: AnalyzeRequest, session: Session = Depends(get_session)) -> dict[str, object]:
+    return start_project_analysis_service(session, project_id, reuse_cache=payload.reuse_cache)
 
 
 @router.post("/jobs/{job_id}/analyze")
@@ -68,6 +96,16 @@ def analyze_job(job_id: str, _: AnalyzeRequest, session: Session = Depends(get_s
 @router.get("/jobs/{job_id}/progress", response_model=JobProgressResponse)
 def get_progress(job_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
     return get_progress_service(session, job_id)
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+    return request_cancel_service(session, job_id)
+
+
+@router.post("/jobs/{job_id}/retry")
+def retry_job(job_id: str, session: Session = Depends(get_session)) -> dict[str, object]:
+    return retry_job_service(session, job_id)
 
 
 @router.get("/jobs/{job_id}/failures")

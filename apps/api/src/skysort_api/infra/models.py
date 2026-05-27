@@ -12,10 +12,26 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    root_path: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    recursive: Mapped[bool] = mapped_column(Boolean, default=True)
+    file_types_json: Mapped[str] = mapped_column(Text, default="[]")
+    last_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    jobs: Mapped[list["Job"]] = relationship(back_populates="project")
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     root_path: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     total_files: Mapped[int] = mapped_column(Integer, default=0)
@@ -28,14 +44,18 @@ class Job(Base):
     failed_files: Mapped[int] = mapped_column(Integer, default=0)
     current_stage: Mapped[str] = mapped_column(String, default="queued")
     error_messages_json: Mapped[str] = mapped_column(Text, default="[]")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     settings_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
     app_version: Mapped[str] = mapped_column(String, nullable=False)
     model_name: Mapped[str] = mapped_column(String, nullable=False)
     prompt_template_hash: Mapped[str] = mapped_column(String, nullable=False)
     response_schema_version: Mapped[str] = mapped_column(String, nullable=False)
 
+    project: Mapped[Project | None] = relationship(back_populates="jobs")
     photos: Mapped[list["Photo"]] = relationship(back_populates="job", cascade="all, delete-orphan")
 
 

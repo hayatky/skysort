@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { Hero } from "@/components/hero";
 import { Panel } from "@/components/panel";
@@ -11,6 +12,17 @@ export function ExportRoute() {
   const [conflictPolicy, setConflictPolicy] = useState<"skip" | "fail" | "overwrite_safe_fields">("skip");
   const xmpExport = useXmpExport();
   const resultsExport = useResultsExport();
+
+  if (!jobId) {
+    return (
+      <>
+        <Hero title="Export" />
+        <Panel title="No Job Selected" copy="Choose a project before exporting results.">
+          <Link className="button" to="/">Open Projects</Link>
+        </Panel>
+      </>
+    );
+  }
 
   return (
     <>

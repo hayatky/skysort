@@ -28,7 +28,7 @@ def test_create_import_job_reuses_unchanged_metadata_and_marks_missing(db_sessio
     _write_jpeg(bravo, (0, 255, 0))
     _write_jpeg(charlie, (0, 0, 255))
 
-    first_job_id, _ = create_import_job(db_session, str(root), True, [".jpg"], True)
+    _, first_job_id, _ = create_import_job(db_session, str(root), True, [".jpg"], True)
     db_session.flush()
     photo_repo = PhotoRepository(db_session)
     first_photos = {photo.file_name: photo for photo in photo_repo.list_by_job(first_job_id, include_missing=True)}
@@ -47,7 +47,7 @@ def test_create_import_job_reuses_unchanged_metadata_and_marks_missing(db_sessio
     delta = root / "delta.jpg"
     _write_jpeg(delta, (64, 64, 64))
 
-    second_job_id, second_count = create_import_job(db_session, str(root), True, [".jpg"], True)
+    _, second_job_id, second_count = create_import_job(db_session, str(root), True, [".jpg"], True)
     db_session.flush()
     assert second_count == 4
 
@@ -72,7 +72,7 @@ def test_create_import_job_commits_job_before_return(isolated_runtime, tmp_path:
     _write_jpeg(root / "alpha.jpg", (255, 0, 0))
 
     with session_scope() as import_session:
-        job_id, count = create_import_job(import_session, str(root), True, [".jpg"], True)
+        _, job_id, count = create_import_job(import_session, str(root), True, [".jpg"], True)
         with session_scope() as read_session:
             persisted = read_session.get(Job, job_id)
 
@@ -85,7 +85,10 @@ def test_normalize_root_path_handles_spaces_japanese_relative_and_symlink(tmp_pa
     root = tmp_path / "写真 folder"
     root.mkdir()
     link = tmp_path / "link"
-    link.symlink_to(root, target_is_directory=True)
+    try:
+        link.symlink_to(root, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable in this Windows test environment: {exc}")
     monkeypatch.chdir(tmp_path)
 
     assert normalize_root_path("写真 folder") == root.resolve()

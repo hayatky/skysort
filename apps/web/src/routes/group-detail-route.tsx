@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import type { ReanalyzeScope } from "@skysort/client";
 
 import { Hero } from "@/components/hero";
@@ -54,6 +54,17 @@ export function GroupDetailRoute() {
     ),
     [groupId, mutate, reanalyzeGroup, reanalyzePhoto, reanalyzeScope, selected, splitGroup],
   );
+
+  if (!jobId) {
+    return (
+      <>
+        <Hero title="Group Detail" />
+        <Panel title="No Job Selected" copy="Choose a project before opening group details.">
+          <Link className="button" to="/">Open Projects</Link>
+        </Panel>
+      </>
+    );
+  }
 
   return (
     <>

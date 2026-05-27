@@ -1,4 +1,4 @@
-export type JobStatus = "queued" | "running" | "completed" | "failed";
+export type JobStatus = "queued" | "running" | "canceling" | "completed" | "failed" | "canceled";
 export type EvaluationStatus = "provisional" | "final" | "ai_eval_failed" | "stale";
 export type SelectionStatus = "normal" | "rejected";
 export type ReanalyzeScope = "technical_only" | "ai_only" | "full";
@@ -11,6 +11,7 @@ export interface ImportRequest {
 }
 
 export interface ImportResponse {
+  project_id: string;
   job_id: string;
   registered_count: number;
 }
@@ -23,6 +24,7 @@ export interface AnalyzeRequest {
 export interface JobProgress {
   id?: string;
   job_id: string;
+  project_id?: string | null;
   status: JobStatus;
   total_files: number;
   imported_files: number;
@@ -33,10 +35,61 @@ export interface JobProgress {
   final_rated_files: number;
   failed_files: number;
   current_stage: string;
+  active_stage_label: string;
+  stage_done: number;
+  stage_total: number;
+  percent: number;
+  cancel_requested: boolean;
+  ai_photo_done: number;
+  ai_photo_total: number;
+  ai_group_done: number;
+  ai_group_total: number;
   errors: string[];
   started_at?: string | null;
   finished_at?: string | null;
+  canceled_at?: string | null;
+  updated_at?: string | null;
   last_error?: string | null;
+}
+
+export interface JobSummary {
+  job_id: string;
+  project_id?: string | null;
+  root_path: string;
+  status: JobStatus;
+  total_files: number;
+  failed_files: number;
+  current_stage: string;
+  active_stage_label: string;
+  percent: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  canceled_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ProjectItem {
+  project_id: string;
+  id: string;
+  name: string;
+  root_path: string;
+  recursive: boolean;
+  file_types: string[];
+  last_job_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  latest_job?: JobSummary | null;
+}
+
+export interface ProjectListResponse {
+  items: ProjectItem[];
+  total: number;
+}
+
+export interface ProjectJobsResponse {
+  project_id: string;
+  items: JobSummary[];
+  total: number;
 }
 
 export interface AIHealthStatus {

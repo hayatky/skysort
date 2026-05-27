@@ -1,12 +1,11 @@
 import { Link, useSearchParams } from "react-router-dom";
 import type { GroupListItem } from "@skysort/client";
 
-import { getStoredJobId } from "@/hooks/use-job-id";
 import { formatScore } from "@/lib/format";
 
 export function GroupCard({ group }: { group: GroupListItem }) {
   const [searchParams] = useSearchParams();
-  const job = searchParams.get("job") ?? getStoredJobId();
+  const job = searchParams.get("job") ?? group.job_id;
   const failedCount = group.items?.filter((photo) => photo.evaluation_status === "ai_eval_failed").length ?? 0;
   const staleCount = (group.stale_flag ? 1 : 0) + (group.items?.filter((photo) => photo.stale_flag).length ?? 0);
   return (

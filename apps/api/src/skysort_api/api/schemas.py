@@ -13,6 +13,7 @@ class ImportRequest(BaseModel):
 
 
 class ImportResponse(BaseModel):
+    project_id: str
     job_id: str
     registered_count: int
 
@@ -23,6 +24,7 @@ class AnalyzeRequest(BaseModel):
 
 class JobProgressResponse(BaseModel):
     job_id: str
+    project_id: str | None = None
     status: str
     total_files: int
     imported_files: int
@@ -33,9 +35,54 @@ class JobProgressResponse(BaseModel):
     provisional_rated_files: int
     final_rated_files: int
     current_stage: str
+    active_stage_label: str
+    stage_done: int
+    stage_total: int
+    percent: int
+    cancel_requested: bool
+    ai_photo_done: int = 0
+    ai_photo_total: int = 0
+    ai_group_done: int = 0
+    ai_group_total: int = 0
     errors: list[str]
     started_at: str | None = None
     finished_at: str | None = None
+    canceled_at: str | None = None
+    updated_at: str | None = None
+
+
+class JobSummaryResponse(BaseModel):
+    job_id: str
+    project_id: str | None = None
+    root_path: str
+    status: str
+    total_files: int
+    failed_files: int
+    current_stage: str
+    active_stage_label: str
+    percent: int
+    started_at: str | None = None
+    finished_at: str | None = None
+    canceled_at: str | None = None
+    updated_at: str | None = None
+
+
+class ProjectResponse(BaseModel):
+    project_id: str
+    id: str
+    name: str
+    root_path: str
+    recursive: bool
+    file_types: list[str]
+    last_job_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    latest_job: JobSummaryResponse | None = None
+
+
+class ProjectListResponse(BaseModel):
+    items: list[ProjectResponse]
+    total: int
 
 
 class AIHealthResponse(BaseModel):

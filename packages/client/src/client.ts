@@ -13,10 +13,14 @@ import type {
   ImportRequest,
   ImportResponse,
   JobProgress,
+  JobSummary,
   MutationResult,
   PhotoListResponse,
   PhotoReviewItem,
   PhotoMutationRequest,
+  ProjectItem,
+  ProjectJobsResponse,
+  ProjectListResponse,
   ReanalyzeRequest,
   SettingsResponse,
   SettingsUpdateRequest,
@@ -52,6 +56,33 @@ export class SkySortApiClient {
     });
   }
 
+  listProjects(limit = 50) {
+    return this.request<Record<string, unknown>>(`/projects?limit=${encodeURIComponent(String(limit))}`).then((raw): ProjectListResponse => {
+      const items = Array.isArray(raw.items) ? (raw.items as Array<Record<string, unknown>>) : [];
+      return { items: items.map((item) => this.normalizeProject(item)), total: Number(raw.total ?? items.length) };
+    });
+  }
+
+  getProject(projectId: string) {
+    return this.request<Record<string, unknown>>(`/projects/${projectId}`).then((raw) => this.normalizeProject(raw));
+  }
+
+  listProjectJobs(projectId: string) {
+    return this.request<Record<string, unknown>>(`/projects/${projectId}/jobs`).then((raw): ProjectJobsResponse => {
+      const items = Array.isArray(raw.items) ? (raw.items as Array<Record<string, unknown>>) : [];
+      return { project_id: String(raw.project_id ?? projectId), items: items.map((item) => this.normalizeJobSummary(item)), total: Number(raw.total ?? items.length) };
+    });
+  }
+
+  startProjectAnalyze(projectId: string, payload: AnalyzeRequest = {}) {
+    return this.request<{ accepted: boolean; project_id: string; job_id: string; registered_count: number }>(`/projects/${projectId}/analyze`, {
+      method: "POST",
+      body: JSON.stringify({
+        reuse_cache: payload.reuse_cache ?? payload.force_reuse_cache ?? true,
+      }),
+    });
+  }
+
   startAnalyze(jobId: string, payload: AnalyzeRequest = {}) {
     return this.request<{ accepted: boolean }>(`/jobs/${jobId}/analyze`, {
       method: "POST",
@@ -65,6 +96,7 @@ export class SkySortApiClient {
     return this.request<Record<string, unknown>>(`/jobs/${jobId}/progress`).then((raw) => ({
       id: String(raw.id ?? jobId),
       job_id: String(raw.job_id ?? raw.id ?? jobId),
+      project_id: (raw.project_id as string | null | undefined) ?? null,
       status: raw.status as JobProgress["status"],
       total_files: Number(raw.total_files ?? 0),
       imported_files: Number(raw.imported_files ?? 0),
@@ -75,11 +107,30 @@ export class SkySortApiClient {
       final_rated_files: Number(raw.final_rated_files ?? raw.finalized_files ?? 0),
       failed_files: Number(raw.failed_files ?? 0),
       current_stage: String(raw.current_stage ?? "queued"),
+      active_stage_label: String(raw.active_stage_label ?? raw.current_stage ?? "queued"),
+      stage_done: Number(raw.stage_done ?? 0),
+      stage_total: Number(raw.stage_total ?? raw.total_files ?? 0),
+      percent: Number(raw.percent ?? 0),
+      cancel_requested: Boolean(raw.cancel_requested),
+      ai_photo_done: Number(raw.ai_photo_done ?? raw.semantically_scored_files ?? 0),
+      ai_photo_total: Number(raw.ai_photo_total ?? raw.total_files ?? 0),
+      ai_group_done: Number(raw.ai_group_done ?? 0),
+      ai_group_total: Number(raw.ai_group_total ?? 0),
       errors: Array.isArray(raw.errors) ? (raw.errors as string[]) : raw.last_error ? [String(raw.last_error)] : [],
       started_at: (raw.started_at as string | null | undefined) ?? null,
       finished_at: (raw.finished_at as string | null | undefined) ?? null,
+      canceled_at: (raw.canceled_at as string | null | undefined) ?? null,
+      updated_at: (raw.updated_at as string | null | undefined) ?? null,
       last_error: (raw.last_error as string | null | undefined) ?? null,
     }));
+  }
+
+  cancelJob(jobId: string) {
+    return this.request<{ accepted: boolean; job_id: string; status: JobProgress["status"] }>(`/jobs/${jobId}/cancel`, { method: "POST" });
+  }
+
+  retryJob(jobId: string) {
+    return this.request<{ accepted: boolean; project_id: string; job_id: string; registered_count: number }>(`/jobs/${jobId}/retry`, { method: "POST" });
   }
 
   getFailures(jobId: string) {
@@ -238,6 +289,39 @@ export class SkySortApiClient {
       composition_score: (item.composition_score as number | undefined) ?? null,
       subject_state_score: (item.subject_state_score as number | undefined) ?? null,
       rarity_score: (item.rarity_score as number | undefined) ?? null,
+    };
+  }
+
+  private normalizeProject(item: Record<string, unknown>): ProjectItem {
+    return {
+      project_id: String(item.project_id ?? item.id),
+      id: String(item.id ?? item.project_id),
+      name: String(item.name ?? "Untitled project"),
+      root_path: String(item.root_path ?? ""),
+      recursive: Boolean(item.recursive ?? true),
+      file_types: Array.isArray(item.file_types) ? (item.file_types as string[]) : [],
+      last_job_id: (item.last_job_id as string | null | undefined) ?? null,
+      created_at: (item.created_at as string | null | undefined) ?? null,
+      updated_at: (item.updated_at as string | null | undefined) ?? null,
+      latest_job: item.latest_job && typeof item.latest_job === "object" ? this.normalizeJobSummary(item.latest_job as Record<string, unknown>) : null,
+    };
+  }
+
+  private normalizeJobSummary(item: Record<string, unknown>): JobSummary {
+    return {
+      job_id: String(item.job_id ?? item.id),
+      project_id: (item.project_id as string | null | undefined) ?? null,
+      root_path: String(item.root_path ?? ""),
+      status: item.status as JobSummary["status"],
+      total_files: Number(item.total_files ?? 0),
+      failed_files: Number(item.failed_files ?? 0),
+      current_stage: String(item.current_stage ?? "queued"),
+      active_stage_label: String(item.active_stage_label ?? item.current_stage ?? "queued"),
+      percent: Number(item.percent ?? 0),
+      started_at: (item.started_at as string | null | undefined) ?? null,
+      finished_at: (item.finished_at as string | null | undefined) ?? null,
+      canceled_at: (item.canceled_at as string | null | undefined) ?? null,
+      updated_at: (item.updated_at as string | null | undefined) ?? null,
     };
   }
 

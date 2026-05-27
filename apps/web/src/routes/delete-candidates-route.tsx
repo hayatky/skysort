@@ -13,6 +13,17 @@ export function DeleteCandidatesRoute() {
   const mutate = usePhotoMutation(jobId);
   const items = photos.data?.items ?? [];
 
+  if (!jobId) {
+    return (
+      <>
+        <Hero title="Delete Candidates" />
+        <Panel title="No Job Selected" copy="Choose a project before reviewing delete candidates.">
+          <Link className="button" to="/">Open Projects</Link>
+        </Panel>
+      </>
+    );
+  }
+
   return (
     <>
       <Hero

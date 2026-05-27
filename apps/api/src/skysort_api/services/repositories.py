@@ -5,7 +5,26 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from skysort_api.infra.models import AIResponse, Group, GroupMember, Job, JobFailure, Photo, PhotoEvaluation, RatingHistory, TechnicalScore
+from skysort_api.infra.models import AIResponse, Group, GroupMember, Job, JobFailure, Photo, PhotoEvaluation, Project, RatingHistory, TechnicalScore
+
+
+class ProjectRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, project: Project) -> None:
+        self.session.add(project)
+
+    def get(self, project_id: str) -> Project | None:
+        return self.session.get(Project, project_id)
+
+    def get_by_root_path(self, root_path: str) -> Project | None:
+        stmt = select(Project).where(Project.root_path == root_path)
+        return self.session.scalars(stmt).first()
+
+    def list_recent(self, limit: int = 50) -> list[Project]:
+        stmt = select(Project).order_by(Project.updated_at.desc(), Project.created_at.desc()).limit(limit)
+        return list(self.session.scalars(stmt))
 
 
 class JobRepository:
@@ -32,6 +51,14 @@ class JobRepository:
 
     def list_groups(self, job_id: str) -> list[Group]:
         return list(self.session.scalars(select(Group).where(Group.job_id == job_id).order_by(Group.created_at)))
+
+    def list_for_project(self, project_id: str) -> list[Job]:
+        stmt = (
+            select(Job)
+            .where(Job.project_id == project_id)
+            .order_by(Job.updated_at.desc(), Job.started_at.desc().nullslast(), Job.id.desc())
+        )
+        return list(self.session.scalars(stmt))
 
 
 class PhotoRepository:

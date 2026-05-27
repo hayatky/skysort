@@ -7,6 +7,7 @@ import { GroupDetailRoute } from "@/routes/group-detail-route";
 import { GroupsRoute } from "@/routes/groups-route";
 import { ImportRoute } from "@/routes/import-route";
 import { ProgressRoute } from "@/routes/progress-route";
+import { ProjectsRoute } from "@/routes/projects-route";
 import { ReviewRoute } from "@/routes/review-route";
 import { SettingsRoute } from "@/routes/settings-route";
 
@@ -14,7 +15,8 @@ export function AppRouter() {
   return (
     <AppLayout>
       <Routes>
-        <Route path="/" element={<ImportRoute />} />
+        <Route path="/" element={<ProjectsRoute />} />
+        <Route path="/import" element={<ImportRoute />} />
         <Route path="/progress" element={<ProgressRoute />} />
         <Route path="/groups" element={<GroupsRoute />} />
         <Route path="/groups/:groupId" element={<GroupDetailRoute />} />

@@ -83,6 +83,17 @@ export function ReviewRoute() {
     setPage(1);
   };
 
+  if (!jobId) {
+    return (
+      <>
+        <Hero title="Review" />
+        <Panel title="No Job Selected" copy="Choose a project before opening review.">
+          <Link className="button" to="/">Open Projects</Link>
+        </Panel>
+      </>
+    );
+  }
+
   return (
     <>
       <Hero

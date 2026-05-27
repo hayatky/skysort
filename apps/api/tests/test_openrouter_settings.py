@@ -84,7 +84,7 @@ def test_import_job_snapshot_records_provider_without_secret(db_session, isolate
     source_dir.mkdir()
     (source_dir / "alpha.jpg").write_bytes(b"fake-jpeg")
 
-    job_id, count = create_import_job(db_session, str(source_dir), True, [".jpg"], True)
+    _, job_id, count = create_import_job(db_session, str(source_dir), True, [".jpg"], True)
 
     assert count == 1
     job = db_session.get(Job, job_id)

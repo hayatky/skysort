@@ -22,7 +22,7 @@ def test_export_xmp_updates_jpeg_signature_for_next_import(db_session, monkeypat
     alpha = root / "alpha.jpg"
     _write_jpeg(alpha, (255, 0, 0))
 
-    job_id, _ = create_import_job(db_session, str(root), True, [".jpg"], True)
+    _, job_id, _ = create_import_job(db_session, str(root), True, [".jpg"], True)
     db_session.flush()
     photo_repo = PhotoRepository(db_session)
     first_photo = photo_repo.list_by_job(job_id)[0]
@@ -82,7 +82,7 @@ def test_export_xmp_updates_jpeg_signature_for_next_import(db_session, monkeypat
     assert Path(updated.preview_path).exists()
     assert Path(updated.thumb_path).exists()
 
-    second_job_id, _ = create_import_job(db_session, str(root), True, [".jpg"], True)
+    _, second_job_id, _ = create_import_job(db_session, str(root), True, [".jpg"], True)
     db_session.flush()
     second_photo = photo_repo.list_by_job(second_job_id)[0]
 

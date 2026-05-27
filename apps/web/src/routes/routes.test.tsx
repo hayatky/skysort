@@ -9,6 +9,7 @@ import { GroupDetailRoute } from "@/routes/group-detail-route";
 import { GroupsRoute } from "@/routes/groups-route";
 import { ImportRoute } from "@/routes/import-route";
 import { ProgressRoute } from "@/routes/progress-route";
+import { ProjectsRoute } from "@/routes/projects-route";
 import { ReviewRoute } from "@/routes/review-route";
 import { SettingsRoute } from "@/routes/settings-route";
 
@@ -24,12 +25,16 @@ const mocks = vi.hoisted(() => ({
   reanalyzePhoto: { mutate: vi.fn() },
   reanalyzeGroup: { mutate: vi.fn() },
   retryFailure: { mutate: vi.fn() },
+  cancelJob: { mutate: vi.fn(), isPending: false },
+  retryJob: { mutateAsync: vi.fn(), isPending: false },
   mergeGroup: { mutate: vi.fn() },
   splitGroup: { mutate: vi.fn() },
   xmpExport: { mutate: vi.fn(), data: { target_count: 1, writable_count: 1, blocked_count: 0, conflict_count: 1, write_candidates: [{ photo_id: "photo_1", summary: "preview diff" }], conflicts: [{ photo_id: "photo_2", summary: "rating conflict", result_code: "conflict" }] } },
   resultsExport: { mutate: vi.fn(), data: { export_path: "/tmp/export.csv" } },
   settings: { data: { ai_provider: "openrouter", ai_base_url: "https://openrouter.ai/api/v1", ai_model_name: "google/gemini-2.5-flash-lite", allow_remote_ai: true, ai_concurrency: 1, image_processing_concurrency: 2, similarity_threshold: 0.86, time_proximity_seconds: 4, candidate_limit: 6, thumbnail_size: 512, preview_size: 1024, compare_preview_size: 512, preview_jpeg_quality: 90, highlight_threshold: 252, shadow_threshold: 3, exiftool_path: "exiftool", cache_dir: "/tmp/cache", weights: { technical_quality: 0.35, composition: 0.35, subject_state: 0.2, rarity: 0.1 }, rating_thresholds: { star_5: 83, star_4: 78, star_3: 64, star_2: 48, reject: 20 } } },
   updateSettings: { mutate: vi.fn() },
+  projects: { data: { items: [{ project_id: "proj_1", id: "proj_1", name: "Haneda", root_path: "C:\\photos\\haneda", recursive: true, file_types: [".jpg"], last_job_id: "job_123", latest_job: { job_id: "job_123", project_id: "proj_1", root_path: "C:\\photos\\haneda", status: "running", total_files: 10, failed_files: 1, current_stage: "semantically_scored", active_stage_label: "AI analysis", percent: 30 } }], total: 1 } },
+  startProjectAnalysis: { mutateAsync: vi.fn(), isPending: false },
 }));
 
 vi.mock("@/features/import/use-import", () => ({
@@ -40,6 +45,13 @@ vi.mock("@/features/import/use-import", () => ({
 vi.mock("@/features/progress/use-progress", () => ({
   useProgress: () => mocks.progress,
   useFailures: () => mocks.failures,
+  useCancelJob: () => mocks.cancelJob,
+  useRetryJob: () => mocks.retryJob,
+}));
+
+vi.mock("@/features/projects/use-projects", () => ({
+  useProjects: () => mocks.projects,
+  useStartProjectAnalysis: () => mocks.startProjectAnalysis,
 }));
 
 vi.mock("@/features/groups/use-groups", () => ({
@@ -73,7 +85,6 @@ vi.mock("@/hooks/use-review-shortcuts", () => ({
 
 vi.mock("@/hooks/use-job-id", () => ({
   useJobId: () => "job_123",
-  getStoredJobId: () => "job_123",
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
@@ -90,6 +101,9 @@ describe("route rendering", () => {
     mocks.reanalyzePhoto.mutate.mockReset();
     mocks.reanalyzeGroup.mutate.mockReset();
     mocks.retryFailure.mutate.mockReset();
+    mocks.cancelJob.mutate.mockReset();
+    mocks.retryJob.mutateAsync.mockReset();
+    mocks.startProjectAnalysis.mutateAsync.mockReset();
     mocks.mergeGroup.mutate.mockReset();
     mocks.splitGroup.mutate.mockReset();
     mocks.xmpExport.mutate.mockReset();
@@ -108,6 +122,19 @@ describe("route rendering", () => {
     expect(markup).toContain("qwen");
   });
 
+  it("renders projects dashboard with persisted latest job", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <ProjectsRoute />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Projects");
+    expect(markup).toContain("Haneda");
+    expect(markup).toContain("AI analysis");
+    expect(markup).toContain("/progress?job=job_123");
+  });
+
   it("renders progress route counts and failures", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
@@ -122,6 +149,8 @@ describe("route rendering", () => {
     expect(markup).toContain("Reason metadata_extraction_failed");
     expect(markup).toContain("Scope full");
     expect(markup).toContain("Retry Item");
+    expect(markup).toContain("Cancel Job");
+    expect(markup).toContain("Retry Job");
   });
 
   it("renders group detail route review state", () => {
@@ -193,10 +222,11 @@ describe("route rendering", () => {
     );
 
     expect(markup).toContain("/groups?job=job_123");
+    expect(markup).toContain("Haneda");
     expect(markup).toContain("/review?job=job_123");
     expect(markup).toContain("/delete-candidates?job=job_123");
     expect(markup).toContain("/export?job=job_123");
-    expect(markup).toContain("/settings?job=job_123");
+    expect(markup).toContain("/settings");
   });
 
   it("renders settings route with threshold controls", () => {

@@ -118,7 +118,10 @@ def write_tags(
     tags = build_desired_tags(rating, selection_status, pick, best_cut, reviewed)
     args = [settings.exiftool_path]
     if suffix in RAW_EXTENSIONS:
-        args.extend(["-o", str(target.with_suffix(".xmp"))])
+        sidecar = str(target.with_suffix(".xmp"))
+        if "/" in file_path and "\\" not in file_path:
+            sidecar = sidecar.replace("\\", "/")
+        args.extend(["-o", sidecar])
     else:
         args.append("-overwrite_original")
     for key, value in tags.items():

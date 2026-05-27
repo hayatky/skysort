@@ -3,17 +3,67 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from skysort_api.infra.file_scan import build_source_signature, compute_fast_hash, file_metadata, iter_photo_files, normalize_root_path
 from skysort_api.infra.image_tools import asset_paths_for_signature
-from skysort_api.infra.models import Job, Photo
+from skysort_api.infra.models import Job, Photo, Project
 from skysort_api.infra.prompt_store import load_prompt
 from skysort_api.infra.settings import get_settings
-from .repositories import JobRepository, PhotoRepository
+from .repositories import JobRepository, PhotoRepository, ProjectRepository
 
 
-def create_import_job(session, root_path: str, recursive: bool, file_types: list[str], reuse_cache: bool) -> tuple[str, int]:
+def create_import_job(session, root_path: str, recursive: bool, file_types: list[str], reuse_cache: bool) -> tuple[str, str, int]:
     root = normalize_root_path(root_path)
+    project = _get_or_create_project(session, root, recursive, file_types)
+    job_id, count = create_project_job(session, project.id, reuse_cache=reuse_cache)
+    return project.id, job_id, count
+
+
+def create_project_job(session, project_id: str, *, reuse_cache: bool) -> tuple[str, int]:
+    project_repo = ProjectRepository(session)
+    project = project_repo.get(project_id)
+    if project is None:
+        raise ValueError(f"Project not found: {project_id}")
+    root = normalize_root_path(project.root_path)
+    file_types = json.loads(project.file_types_json)
+    return _create_job_for_project(session, project, root, bool(project.recursive), file_types, reuse_cache)
+
+
+def _get_or_create_project(session, root: Path, recursive: bool, file_types: list[str]) -> Project:
+    project_repo = ProjectRepository(session)
+    now = datetime.now(timezone.utc)
+    project = project_repo.get_by_root_path(str(root))
+    if project is None:
+        project = Project(
+            id=f"proj_{uuid.uuid4().hex[:10]}",
+            name=root.name or str(root),
+            root_path=str(root),
+            recursive=recursive,
+            file_types_json=json.dumps(file_types),
+            last_job_id=None,
+            created_at=now,
+            updated_at=now,
+        )
+        project_repo.add(project)
+        session.flush()
+        return project
+    project.name = project.name or root.name or str(root)
+    project.recursive = recursive
+    project.file_types_json = json.dumps(file_types)
+    project.updated_at = now
+    session.flush()
+    return project
+
+
+def _create_job_for_project(
+    session,
+    project: Project,
+    root: Path,
+    recursive: bool,
+    file_types: list[str],
+    reuse_cache: bool,
+) -> tuple[str, int]:
     files = iter_photo_files(root, recursive=recursive, file_types=file_types)
     settings = get_settings()
     _, prompt_hash = load_prompt("single_image_v1")
@@ -24,21 +74,24 @@ def create_import_job(session, root_path: str, recursive: bool, file_types: list
     if previous_job is not None:
         previous_photos = {photo.file_path: photo for photo in photo_repo.list_for_paths(previous_job.id)}
     job_id = f"job_{uuid.uuid4().hex[:10]}"
+    now = datetime.now(timezone.utc)
     job = Job(
         id=job_id,
+        project_id=project.id,
         root_path=str(root),
         status="queued",
         total_files=len(files),
         imported_files=0,
         current_stage="imported",
+        cancel_requested=False,
         settings_snapshot_json=json.dumps(_settings_snapshot(settings, reuse_cache)),
         app_version=settings.app_version,
         model_name=settings.ai_model_name,
         prompt_template_hash=prompt_hash,
         response_schema_version=settings.response_schema_version,
+        updated_at=now,
     )
     photos = []
-    now = datetime.now(timezone.utc)
     current_paths = {str(path) for path in files}
     for index, path in enumerate(files):
         size, mtime = file_metadata(path)
@@ -92,6 +145,8 @@ def create_import_job(session, root_path: str, recursive: bool, file_types: list
 
     job_repo.add(job)
     photo_repo.add_many(photos)
+    project.last_job_id = job_id
+    project.updated_at = now
     session.commit()
     return job_id, len(photos)
 

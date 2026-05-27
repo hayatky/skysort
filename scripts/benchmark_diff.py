@@ -140,7 +140,7 @@ def _relative_path(file_path: str, root: Path | None) -> str:
     if not root or not file_path:
         return file_path
     try:
-        return str(Path(file_path).resolve().relative_to(root.resolve()))
+        return Path(file_path).resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
         return file_path
 

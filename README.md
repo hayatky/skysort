@@ -66,6 +66,7 @@ Important runtime behavior:
 - `GET /api/groups` accepts JSON `filter`, `sort`, `page`, and `page_size` query parameters for large review sets
 - `GET /api/photos` accepts JSON `filter`, `page`, `page_size`, and `include_missing=true` for server-side review filtering
 - `filter` supports rating, reject, pick, best cut, reviewed, stale, status, camera/lens, text search (`q`), filename, and capture date range conditions
+- projects are persisted on the server; `GET /api/projects` returns recent projects with their latest job, and project retry/reanalysis creates a new cache-reusing job
 - `POST /api/export/results` and `POST /api/export/xmp` apply the same review filters
 - AI health is checked before `POST /api/jobs/{job_id}/analyze`
 - remote AI endpoints are blocked unless `allow_remote_ai=true`
@@ -96,7 +97,13 @@ The Vite dev server accepts both `http://127.0.0.1:5173` and `http://localhost:5
 ### Backend
 
 - `POST /api/import`
+- `GET /api/projects`
+- `GET /api/projects/{project_id}`
+- `GET /api/projects/{project_id}/jobs`
+- `POST /api/projects/{project_id}/analyze`
 - `POST /api/jobs/{job_id}/analyze`
+- `POST /api/jobs/{job_id}/cancel`
+- `POST /api/jobs/{job_id}/retry`
 - `GET /api/jobs/{job_id}/progress`
 - `GET /api/jobs/{job_id}/failures`
 - `POST /api/jobs/{job_id}/failures/{failure_id}/retry`
@@ -119,7 +126,8 @@ The Vite dev server accepts both `http://127.0.0.1:5173` and `http://localhost:5
 ### Frontend
 
 - Import screen with AI preflight
-- Progress monitoring screen
+- Projects dashboard with server-backed project/job discovery
+- Progress monitoring screen with stage, AI photo/group progress, graceful cancel, and retry into a new cache-reusing job
 - Failure list with retryable item retry controls and separated reason codes for preview generation, metadata extraction, AI timeout, and JSON/schema failures
 - Group overview
 - Group detail review with keyboard shortcuts
@@ -192,7 +200,7 @@ python scripts/grouping_validate.py --fixture docs/grouping-validation.example.j
 - ARW metadata is sourced from the embedded preview when available; tags not present there remain `null` rather than blocking the job.
 - Settings changes that affect scoring are snapshotted per job, so a full re-run with new thresholds creates a new analysis job instead of mutating old results.
 - OpenRouter credentials are env-only and are never returned by `GET /api/settings` or stored in `settings.json`.
-- Phase 1 resume policy is new-job rerun with cache/result reuse; same-job mid-stage resume is deferred.
+- Phase 1 resume policy is new-job rerun with cache/result reuse; same-job mid-stage resume is deferred. Running jobs support graceful cancel, which preserves partial results and marks the job `canceled`.
 
 ## XMP Safety Policy
 

@@ -39,6 +39,17 @@ export function GroupsRoute() {
     setPage(1);
   };
 
+  if (!jobId) {
+    return (
+      <>
+        <Hero title="Groups" />
+        <Panel title="No Job Selected" copy="Choose a project before opening groups.">
+          <Link className="button" to="/">Open Projects</Link>
+        </Panel>
+      </>
+    );
+  }
+
   return (
     <>
       <Hero

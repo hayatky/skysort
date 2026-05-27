@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from skysort_api.infra.models import Group, GroupMember, Job, Photo, PhotoEvaluation, TechnicalScore
+from skysort_api.infra.models import Group, Job, Photo, PhotoEvaluation, Project, TechnicalScore
 
 
 def isoformat(value: datetime | None) -> str | None:
@@ -49,8 +49,11 @@ def photo_to_review_item(
 def job_to_progress(job: Job) -> dict[str, object]:
     import json
 
+    stage_done, stage_total = _stage_counts(job)
+    percent = int(round((stage_done / stage_total) * 100)) if stage_total else 0
     return {
         "job_id": job.id,
+        "project_id": job.project_id,
         "status": job.status,
         "total_files": job.total_files,
         "imported_files": job.imported_files,
@@ -61,10 +64,92 @@ def job_to_progress(job: Job) -> dict[str, object]:
         "final_rated_files": job.final_rated_files,
         "failed_files": job.failed_files,
         "current_stage": job.current_stage,
+        "active_stage_label": _stage_label(job.current_stage),
+        "stage_done": stage_done,
+        "stage_total": stage_total,
+        "percent": min(100, max(0, percent)),
+        "cancel_requested": job.cancel_requested,
         "errors": json.loads(job.error_messages_json),
         "started_at": isoformat(job.started_at),
         "finished_at": isoformat(job.finished_at),
+        "canceled_at": isoformat(job.canceled_at),
+        "updated_at": isoformat(job.updated_at),
     }
+
+
+def job_to_summary(job: Job) -> dict[str, object]:
+    return {
+        "job_id": job.id,
+        "project_id": job.project_id,
+        "root_path": job.root_path,
+        "status": job.status,
+        "total_files": job.total_files,
+        "failed_files": job.failed_files,
+        "current_stage": job.current_stage,
+        "active_stage_label": _stage_label(job.current_stage),
+        "percent": job_to_progress(job)["percent"],
+        "started_at": isoformat(job.started_at),
+        "finished_at": isoformat(job.finished_at),
+        "canceled_at": isoformat(job.canceled_at),
+        "updated_at": isoformat(job.updated_at),
+    }
+
+
+def project_to_item(project: Project, latest_job: Job | None = None) -> dict[str, object]:
+    return {
+        "project_id": project.id,
+        "id": project.id,
+        "name": project.name,
+        "root_path": project.root_path,
+        "recursive": project.recursive,
+        "file_types": json_loads(project.file_types_json, []),
+        "last_job_id": project.last_job_id,
+        "created_at": isoformat(project.created_at),
+        "updated_at": isoformat(project.updated_at),
+        "latest_job": job_to_summary(latest_job) if latest_job else None,
+    }
+
+
+def json_loads(value: str, fallback):
+    import json
+
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return fallback
+
+
+def _stage_counts(job: Job) -> tuple[int, int]:
+    total = job.total_files
+    if job.current_stage == "preview_exif":
+        return job.imported_files, total
+    if job.current_stage == "grouped":
+        return job.grouped_files, total
+    if job.current_stage in {"technically_scored", "technical_scoring"}:
+        return job.technically_scored_files, total
+    if job.current_stage in {"semantically_scored", "ai_eval_failed", "single", "group_compare"}:
+        return job.semantically_scored_files, total
+    if job.current_stage in {"finalized", "completed"} or job.status == "completed":
+        return total, total
+    return max(job.imported_files, job.grouped_files, job.technically_scored_files, job.semantically_scored_files), total
+
+
+def _stage_label(stage: str) -> str:
+    labels = {
+        "imported": "Import queued",
+        "queued": "Queued",
+        "preview_exif": "Preview and metadata",
+        "grouped": "Grouping",
+        "technically_scored": "Technical scoring",
+        "technical_scoring": "Technical scoring",
+        "semantically_scored": "AI analysis",
+        "single": "AI single-photo analysis",
+        "group_compare": "AI group comparison",
+        "finalized": "Finalized",
+        "ai_health_failed": "AI health failed",
+        "canceled": "Canceled",
+    }
+    return labels.get(stage, stage.replace("_", " ").title())
 
 
 def group_to_item(group: Group, photos: list[dict[str, object]]) -> dict[str, object]:

@@ -166,7 +166,11 @@ class MetadataExtractionError(RuntimeError):
     pass
 
 
-def run_analysis(session, job_id: str) -> None:
+class AnalysisCanceled(RuntimeError):
+    pass
+
+
+def run_analysis(session, job_id: str, cancel_requested: Callable[[], bool] | None = None) -> None:
     job_repo = JobRepository(session)
     photo_repo = PhotoRepository(session)
     group_repo = GroupRepository(session)
@@ -181,130 +185,157 @@ def run_analysis(session, job_id: str) -> None:
     previous_job = job_repo.previous_for_root_path(job.root_path, job.id)
     previous_context = _load_previous_context(session, job, previous_job) if previous_job is not None else None
 
-    health = ai_client.health_check()
-    if not _health_ready(health):
-        _fail_job(session, job, failure_repo, "ai_health_failed", health.error_detail or "AI health check failed")
-        return
+    try:
+        _raise_if_cancel_requested(session, job, cancel_requested)
+        health = ai_client.health_check()
+        if not _health_ready(health):
+            _fail_job(session, job, failure_repo, "ai_health_failed", health.error_detail or "AI health check failed")
+            return
 
-    job.status = "running"
-    job.started_at = job.started_at or datetime.now(timezone.utc)
-    job.current_stage = "preview_exif"
-    session.commit()
+        job.status = "running"
+        job.started_at = job.started_at or datetime.now(timezone.utc)
+        job.current_stage = "preview_exif"
+        job.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        _raise_if_cancel_requested(session, job, cancel_requested)
 
-    reuse_cache = _reuse_cache_enabled(job)
-    settings_snapshot = get_settings()
-    photos = photo_repo.list_by_job(job_id)
-    candidate_records: list[tuple[Photo, PhotoCandidate]] = []
-    preparation_tasks = [
-        _build_photo_preparation_task(
-            photo,
-            previous_photo=previous_context.photos_by_path.get(photo.file_path) if previous_context else None,
-            reuse_cache=reuse_cache,
-        )
-        for photo in photos
-    ]
-    photos_by_id = {photo.id: photo for photo in photos}
-    for task, result in _map_with_concurrency(
-        preparation_tasks,
-        max_workers=settings_snapshot.image_processing_concurrency,
-        worker=_prepare_photo_from_task,
-    ):
-        photo = photos_by_id[task.photo_id]
-        try:
-            if isinstance(result, BaseException):
-                raise result
-            _apply_photo_preparation_result(photo, result)
-            candidate_records.append(
-                (
-                    photo,
-                    PhotoCandidate(
-                        photo_id=photo.id,
-                        capture_timestamp_ms=photo.capture_timestamp_ms,
-                        capture_order_index=photo.capture_order_index,
-                        similarity_seed=result.similarity_seed,
-                    ),
-                )
+        reuse_cache = _reuse_cache_enabled(job)
+        settings_snapshot = get_settings()
+        photos = photo_repo.list_by_job(job_id)
+        candidate_records: list[tuple[Photo, PhotoCandidate]] = []
+        preparation_tasks = [
+            _build_photo_preparation_task(
+                photo,
+                previous_photo=previous_context.photos_by_path.get(photo.file_path) if previous_context else None,
+                reuse_cache=reuse_cache,
             )
-        except Exception as exc:
-            logger.exception("Preview/EXIF processing failed for %s", photo.file_path)
-            _record_failure(session, job, failure_repo, "preview_exif", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("preview_exif", exc))
-        finally:
-            job.imported_files = len(candidate_records)
-            session.commit()
+            for photo in photos
+        ]
+        photos_by_id = {photo.id: photo for photo in photos}
+        for chunk in _chunked(preparation_tasks, settings_snapshot.image_processing_concurrency):
+            _raise_if_cancel_requested(session, job, cancel_requested)
+            for task, result in _map_with_concurrency(
+                chunk,
+                max_workers=settings_snapshot.image_processing_concurrency,
+                worker=_prepare_photo_from_task,
+            ):
+                _raise_if_cancel_requested(session, job, cancel_requested)
+                photo = photos_by_id[task.photo_id]
+                try:
+                    if isinstance(result, BaseException):
+                        raise result
+                    _apply_photo_preparation_result(photo, result)
+                    candidate_records.append(
+                        (
+                            photo,
+                            PhotoCandidate(
+                                photo_id=photo.id,
+                                capture_timestamp_ms=photo.capture_timestamp_ms,
+                                capture_order_index=photo.capture_order_index,
+                                similarity_seed=result.similarity_seed,
+                            ),
+                        )
+                    )
+                except Exception as exc:
+                    logger.exception("Preview/EXIF processing failed for %s", photo.file_path)
+                    _record_failure(session, job, failure_repo, "preview_exif", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("preview_exif", exc))
+                finally:
+                    job.imported_files = len(candidate_records)
+                    job.updated_at = datetime.now(timezone.utc)
+                    session.commit()
 
-    ordered_candidate_records = _sort_candidate_records(candidate_records)
-    ordered_photos = [photo for photo, _ in ordered_candidate_records]
+        ordered_candidate_records = _sort_candidate_records(candidate_records)
+        ordered_photos = [photo for photo, _ in ordered_candidate_records]
 
-    job.current_stage = "grouped"
-    groups, members = _group_candidates(job_id, ordered_candidate_records)
-    group_repo.replace_for_job(job_id, groups, members)
-    members_by_group_id = _group_members_by_group(members)
-    job.grouped_files = len(ordered_candidate_records)
-    session.commit()
+        _raise_if_cancel_requested(session, job, cancel_requested)
+        job.current_stage = "grouped"
+        job.updated_at = datetime.now(timezone.utc)
+        groups, members = _group_candidates(job_id, ordered_candidate_records)
+        group_repo.replace_for_job(job_id, groups, members)
+        members_by_group_id = _group_members_by_group(members)
+        job.grouped_files = len(ordered_candidate_records)
+        session.commit()
 
-    job.current_stage = "technically_scored"
-    technical_tasks = [photo for photo in ordered_photos if not photo.is_missing]
-    reusable_photo_ids: set[str] = set()
-    photos_to_score: list[Photo] = []
-    for photo in technical_tasks:
-        try:
-            if _reuse_technical_score(eval_repo, previous_context, photo, job.id):
-                reusable_photo_ids.add(photo.id)
+        _raise_if_cancel_requested(session, job, cancel_requested)
+        job.current_stage = "technically_scored"
+        job.updated_at = datetime.now(timezone.utc)
+        technical_tasks = [photo for photo in ordered_photos if not photo.is_missing]
+        reusable_photo_ids: set[str] = set()
+        photos_to_score: list[Photo] = []
+        for photo in technical_tasks:
+            _raise_if_cancel_requested(session, job, cancel_requested)
+            try:
+                if _reuse_technical_score(eval_repo, previous_context, photo, job.id):
+                    reusable_photo_ids.add(photo.id)
+                    _refresh_progress_counts(job, eval_repo)
+                    job.updated_at = datetime.now(timezone.utc)
+                    session.commit()
+                else:
+                    photos_to_score.append(photo)
+            except Exception as exc:
+                logger.exception("Technical score reuse failed for %s", photo.file_path)
+                _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True)
                 _refresh_progress_counts(job, eval_repo)
+                job.updated_at = datetime.now(timezone.utc)
                 session.commit()
-            else:
-                photos_to_score.append(photo)
-        except Exception as exc:
-            logger.exception("Technical score reuse failed for %s", photo.file_path)
-            _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True)
-            _refresh_progress_counts(job, eval_repo)
-            session.commit()
-    for photo, result in _map_with_concurrency(
-        photos_to_score,
-        max_workers=settings_snapshot.image_processing_concurrency,
-        worker=_compute_technical_score_result,
-    ):
-        if photo.is_missing:
-            continue
-        try:
-            if isinstance(result, BaseException):
-                raise result
-            if photo.id not in reusable_photo_ids:
-                _apply_technical_score_result(session, eval_repo, photo, job.id, result)
-        except Exception as exc:
-            logger.exception("Technical scoring failed for %s", photo.file_path)
-            _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("technical_scoring", exc))
-        finally:
-            _refresh_progress_counts(job, eval_repo)
-            session.commit()
+        for chunk in _chunked(photos_to_score, settings_snapshot.image_processing_concurrency):
+            _raise_if_cancel_requested(session, job, cancel_requested)
+            for photo, result in _map_with_concurrency(
+                chunk,
+                max_workers=settings_snapshot.image_processing_concurrency,
+                worker=_compute_technical_score_result,
+            ):
+                _raise_if_cancel_requested(session, job, cancel_requested)
+                if photo.is_missing:
+                    continue
+                try:
+                    if isinstance(result, BaseException):
+                        raise result
+                    if photo.id not in reusable_photo_ids:
+                        _apply_technical_score_result(session, eval_repo, photo, job.id, result)
+                except Exception as exc:
+                    logger.exception("Technical scoring failed for %s", photo.file_path)
+                    _record_failure(session, job, failure_repo, "technical_scoring", str(exc), photo=photo, retryable=True, reason_code=_reason_code_for_exception("technical_scoring", exc))
+                finally:
+                    _refresh_progress_counts(job, eval_repo)
+                    job.updated_at = datetime.now(timezone.utc)
+                    session.commit()
 
-    job.current_stage = "semantically_scored"
-    for group in groups:
-        try:
-            member_ids = [member.photo_id for member in members_by_group_id[group.id]]
-            reused = _reuse_group_results(
-                session,
-                eval_repo,
-                photo_repo,
-                previous_context,
-                job,
-                group,
-                members_by_group_id[group.id],
-            )
-            if not reused:
-                _evaluate_group(session, eval_repo, photo_repo, failure_repo, job, group, member_ids, ai_client)
-        except Exception as exc:
-            logger.exception("Group AI evaluation failed for %s", group.id)
-            _record_failure(session, job, failure_repo, "semantically_scored", str(exc), group=group, retryable=True, reason_code=_reason_code_for_exception("semantically_scored", exc))
-        finally:
-            _refresh_progress_counts(job, eval_repo)
-            session.commit()
+        _raise_if_cancel_requested(session, job, cancel_requested)
+        job.current_stage = "semantically_scored"
+        job.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        for group in groups:
+            _raise_if_cancel_requested(session, job, cancel_requested)
+            try:
+                member_ids = [member.photo_id for member in members_by_group_id[group.id]]
+                reused = _reuse_group_results(
+                    session,
+                    eval_repo,
+                    photo_repo,
+                    previous_context,
+                    job,
+                    group,
+                    members_by_group_id[group.id],
+                )
+                if not reused:
+                    _evaluate_group(session, eval_repo, photo_repo, failure_repo, job, group, member_ids, ai_client)
+            except Exception as exc:
+                logger.exception("Group AI evaluation failed for %s", group.id)
+                _record_failure(session, job, failure_repo, "semantically_scored", str(exc), group=group, retryable=True, reason_code=_reason_code_for_exception("semantically_scored", exc))
+            finally:
+                _refresh_progress_counts(job, eval_repo)
+                job.updated_at = datetime.now(timezone.utc)
+                session.commit()
 
-    job.current_stage = "finalized"
-    _refresh_progress_counts(job, eval_repo)
-    job.status = "completed"
-    job.finished_at = datetime.now(timezone.utc)
-    session.commit()
+        job.current_stage = "finalized"
+        _refresh_progress_counts(job, eval_repo)
+        job.status = "completed"
+        job.finished_at = datetime.now(timezone.utc)
+        job.updated_at = job.finished_at
+        session.commit()
+    except AnalysisCanceled:
+        _cancel_job(session, job)
 
 
 def reanalyze_photos(session, job_id: str, photo_ids: list[str], scope: str) -> None:
@@ -337,6 +368,32 @@ def reanalyze_photos(session, job_id: str, photo_ids: list[str], scope: str) -> 
             _evaluate_group(session, eval_repo, photo_repo, failure_repo, job, group, member_ids, ai_client)
             session.commit()
     _refresh_progress_counts(job, eval_repo)
+    session.commit()
+
+
+def _chunked(items: list[T], chunk_size: int) -> list[list[T]]:
+    size = max(1, chunk_size)
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+def _raise_if_cancel_requested(session, job: Job, cancel_requested: Callable[[], bool] | None) -> None:
+    session.refresh(job)
+    if bool(cancel_requested and cancel_requested()) or job.cancel_requested or job.status == "canceling":
+        job.cancel_requested = True
+        job.status = "canceling"
+        job.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        raise AnalysisCanceled()
+
+
+def _cancel_job(session, job: Job) -> None:
+    now = datetime.now(timezone.utc)
+    job.status = "canceled"
+    job.current_stage = "canceled"
+    job.cancel_requested = True
+    job.canceled_at = now
+    job.finished_at = now
+    job.updated_at = now
     session.commit()
 
 
@@ -1190,9 +1247,11 @@ def _record_history(eval_repo: EvaluationRepository, current: PhotoEvaluation | 
 
 
 def _fail_job(session, job: Job, failure_repo: FailureRepository, stage: str, message: str) -> None:
+    now = datetime.now(timezone.utc)
     job.status = "failed"
     job.current_stage = stage
-    job.finished_at = datetime.now(timezone.utc)
+    job.finished_at = now
+    job.updated_at = now
     _record_failure(session, job, failure_repo, stage, message, retryable=False)
     session.commit()
 

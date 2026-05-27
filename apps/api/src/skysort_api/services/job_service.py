@@ -1,17 +1,57 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 
 from skysort_api.infra.ai_client import AIHealthResult, VisionLanguageModelClient
-from skysort_api.services.repositories import EvaluationRepository, FailureRepository, GroupRepository, JobRepository, PhotoRepository
-from skysort_api.services.serialization import job_to_progress
+from skysort_api.services.import_service import create_import_job, create_project_job
+from skysort_api.services.repositories import EvaluationRepository, FailureRepository, GroupRepository, JobRepository, PhotoRepository, ProjectRepository
+from skysort_api.services.serialization import job_to_progress, job_to_summary, project_to_item
 from skysort_api.workers.job_runner import job_runner
+
+
+def list_projects(session, limit: int = 50) -> dict[str, object]:
+    project_repo = ProjectRepository(session)
+    job_repo = JobRepository(session)
+    items = []
+    for project in project_repo.list_recent(limit):
+        latest_job = job_repo.get(project.last_job_id) if project.last_job_id else None
+        items.append(project_to_item(project, latest_job))
+    return {"items": items, "total": len(items)}
+
+
+def get_project(session, project_id: str) -> dict[str, object]:
+    project = ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    latest_job = JobRepository(session).get(project.last_job_id) if project.last_job_id else None
+    return project_to_item(project, latest_job)
+
+
+def list_project_jobs(session, project_id: str) -> dict[str, object]:
+    project = ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    items = [job_to_summary(job) for job in JobRepository(session).list_for_project(project_id)]
+    return {"project_id": project_id, "items": items, "total": len(items)}
+
+
+def start_project_analysis(session, project_id: str, reuse_cache: bool = True) -> dict[str, object]:
+    try:
+        job_id, registered_count = create_project_job(session, project_id, reuse_cache=reuse_cache)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    start_analysis(session, job_id)
+    return {"accepted": True, "project_id": project_id, "job_id": job_id, "registered_count": registered_count}
 
 
 def start_analysis(session, job_id: str) -> dict[str, bool]:
     job = JobRepository(session).get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+    if job.status in {"running", "canceling"}:
+        return {"accepted": True}
 
     health = VisionLanguageModelClient().health_check()
     if not _health_ready(health):
@@ -25,7 +65,57 @@ def get_progress(session, job_id: str) -> dict[str, object]:
     job = JobRepository(session).get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    return job_to_progress(job)
+    payload = job_to_progress(job)
+    group_repo = GroupRepository(session)
+    eval_repo = EvaluationRepository(session)
+    groups = group_repo.list_by_job(job_id)
+    current = eval_repo.list_current_for_job(job_id)
+    final_by_group: dict[str, list[str]] = {}
+    for evaluation in current:
+        if evaluation.group_id and evaluation.evaluation_status in {"final", "ai_eval_failed"}:
+            final_by_group.setdefault(evaluation.group_id, []).append(evaluation.photo_id)
+    group_done = 0
+    for group in groups:
+        members = group_repo.list_members(group.id)
+        final_members = set(final_by_group.get(group.id, []))
+        if members and all(member.photo_id in final_members for member in members):
+            group_done += 1
+    payload.update(
+        {
+            "ai_photo_done": job.semantically_scored_files,
+            "ai_photo_total": job.total_files,
+            "ai_group_done": group_done,
+            "ai_group_total": len(groups),
+        }
+    )
+    return payload
+
+
+def request_cancel(session, job_id: str) -> dict[str, object]:
+    job = JobRepository(session).get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status in {"completed", "failed", "canceled"}:
+        return {"accepted": False, "job_id": job_id, "status": job.status}
+    job.cancel_requested = True
+    job.status = "canceling"
+    job.updated_at = datetime.now(timezone.utc)
+    job_runner.cancel(job_id)
+    session.commit()
+    return {"accepted": True, "job_id": job_id, "status": job.status}
+
+
+def retry_job(session, job_id: str) -> dict[str, object]:
+    job = JobRepository(session).get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status not in {"failed", "canceled"}:
+        raise HTTPException(status_code=400, detail="only failed or canceled jobs can be retried")
+    if job.project_id:
+        return start_project_analysis(session, job.project_id, reuse_cache=True)
+    project_id, retry_job_id, registered_count = create_import_job(session, job.root_path, True, [".arw", ".jpg", ".jpeg", ".png"], True)
+    start_analysis(session, retry_job_id)
+    return {"accepted": True, "project_id": project_id, "job_id": retry_job_id, "registered_count": registered_count}
 
 
 def get_failures(session, job_id: str) -> dict[str, object]:
