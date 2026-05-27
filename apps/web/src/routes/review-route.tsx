@@ -86,9 +86,7 @@ export function ReviewRoute() {
   return (
     <>
       <Hero
-        title="Global review for star tiers and reject lanes."
-        copy="大量件数向けに仮想スクロールを前提にした全体レビューです。未確認、reject、pick を横断で拾います。"
-        badge="Global Review"
+        title="Review"
         right={
           <>
             <div className="pill">Visible {counts.visible}</div>
@@ -96,8 +94,8 @@ export function ReviewRoute() {
           </>
         }
       />
-      <Panel title="All Photos" copy={`${items.length} frames`}>
-        <div className="field-grid" style={{ marginBottom: 16 }}>
+      <Panel title="All Photos">
+        <div className="field-grid" style={{ marginBottom: 12 }}>
           <div className="field">
             <label htmlFor="review-search">Search</label>
             <input
@@ -115,19 +113,25 @@ export function ReviewRoute() {
             <label htmlFor="review-date-to">To</label>
             <input id="review-date-to" type="date" value={dateTo} onChange={(event) => changeDateTo(event.target.value)} />
           </div>
-        </div>
-        <div className="actions filter-actions" style={{ marginBottom: 16 }}>
-          <button className="button secondary" type="button" onClick={() => changeFilter("all")}>All</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("pending")}>Unreviewed</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("reject")}>Reject</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("drop")}>Delete Candidates</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("pick")}>Pick</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("best")}>Best Cut</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("stale")}>Stale</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("missing")}>Missing</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("ai_failed")}>AI Failed</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("star:5")}>★5</button>
-          <button className="button secondary" type="button" onClick={() => changeFilter("star:4")}>★4</button>
+          <div className="field">
+            <label htmlFor="review-filter">Filter</label>
+            <select id="review-filter" className="filter-select" value={filter} onChange={(event) => changeFilter(event.target.value)}>
+              <option value="all">All</option>
+              <option value="pending">Unreviewed</option>
+              <option value="reject">Reject</option>
+              <option value="drop">Delete Candidates</option>
+              <option value="pick">Pick</option>
+              <option value="best">Best Cut</option>
+              <option value="star:5">⊅5</option>
+              <option value="star:4">⊅4</option>
+              <option value="star:3">⊅3</option>
+              <option value="star:2">⊅2</option>
+              <option value="star:1">⊅1</option>
+              <option value="stale">Stale</option>
+              <option value="missing">Missing</option>
+              <option value="ai_failed">AI Failed</option>
+            </select>
+          </div>
         </div>
         <div className="review-workspace">
           <div ref={parentRef} className="virtual-list review-list">
@@ -172,11 +176,21 @@ export function ReviewRoute() {
                 {selected.ai_reason ? <p className="panel-copy">{selected.ai_reason}</p> : null}
                 <div className="rating-controls" aria-label="Rating controls">
                   {[1, 2, 3, 4, 5].map((rating) => (
-                    <button key={rating} type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, rating, selection_status: "normal" })}>
+                    <button
+                      key={rating}
+                      type="button"
+                      className={selected.rating === rating && selected.selection_status !== "rejected" ? "active" : undefined}
+                      onClick={() => mutate.mutate({ photoId: selected.photo_id, rating, selection_status: "normal" })}
+                    >
                       ★{rating}
                     </button>
                   ))}
-                  <button type="button" onClick={() => mutate.mutate({ photoId: selected.photo_id, selection_status: "rejected", rating: null })}>Reject</button>
+                  <button
+                    type="button"
+                    className={selected.selection_status === "rejected" ? "active" : undefined}
+                    style={selected.selection_status === "rejected" ? { background: "var(--danger)", color: "white", borderColor: "var(--danger)" } : undefined}
+                    onClick={() => mutate.mutate({ photoId: selected.photo_id, selection_status: "rejected", rating: null })}
+                  >Reject</button>
                 </div>
                 <div className="actions">
                   {selected.group_id ? (

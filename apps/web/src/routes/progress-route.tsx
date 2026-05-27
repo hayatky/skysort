@@ -18,9 +18,7 @@ export function ProgressRoute() {
   return (
     <>
       <Hero
-        title="Pipeline telemetry for long local runs."
-        copy="ポーリングを正本にして進捗を監視します。SSE を入れても、この画面のフォールバックは変えません。"
-        badge="Job Progress"
+        title="Progress"
         right={
           <StatGrid
             items={[
@@ -54,7 +52,7 @@ export function ProgressRoute() {
         </div>
       </Panel>
 
-      <Panel title="Failures" copy="画像単位の失敗は全体停止にしません。">
+      <Panel title="Failures">
         {failures.data?.items?.length ? (
           <div className="grid">
             {failures.data.items.map((item) => (
@@ -83,7 +81,7 @@ export function ProgressRoute() {
           <div className="empty">No failures recorded.</div>
         )}
       </Panel>
-      <Panel title="AI Health" copy="解析前提の LM Studio 接続状態">
+      <Panel title="AI Health">
         <StatGrid
           items={[
             { label: "Reachable", value: health.data?.reachable ? "YES" : "NO" },

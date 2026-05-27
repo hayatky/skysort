@@ -14,14 +14,10 @@ export function ExportRoute() {
 
   return (
     <>
-      <Hero
-        title="Dry-run first, then commit metadata writes."
-        copy="ARW はサイドカー前提、JPEG は評価タグのみ保守的更新です。ExifTool 未導入時はここだけ止めます。"
-        badge="Export"
-      />
+      <Hero title="Export" />
 
       <div className="grid cols-2">
-        <Panel title="XMP Write-back" copy="`dry_run=true` が既定です。">
+        <Panel title="XMP Write-back">
           <div className="field-grid" style={{ marginBottom: 16 }}>
             <div className="field">
               <label htmlFor="conflict_policy">Conflict Policy</label>
@@ -71,7 +67,7 @@ export function ExportRoute() {
           ) : null}
         </Panel>
 
-        <Panel title="Result Export" copy="レビュー結果を CSV / JSON で持ち出します。">
+        <Panel title="Result Export">
           <div className="field-grid">
             <div className="field">
               <label htmlFor="format">Format</label>

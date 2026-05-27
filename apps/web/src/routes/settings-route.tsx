@@ -51,7 +51,6 @@ export function SettingsRoute() {
   }, [settings.data]);
 
   const provider = (form.ai_provider ?? settings.data?.ai_provider ?? "lm_studio") as "lm_studio" | "openrouter";
-  const runtimeKeys = provider === "openrouter" ? ["ai_base_url", "ai_model_name", "allow_remote_ai", ...baseEditableKeys] : ["ai_base_url", "ai_model_name", ...baseEditableKeys];
 
   const handleProviderChange = (nextProvider: "lm_studio" | "openrouter") => {
     setForm((current) => ({
@@ -63,60 +62,82 @@ export function SettingsRoute() {
 
   return (
     <>
-      <Hero
-        title="Tunable thresholds without breaking reproducibility."
-        copy="MVP では運用上重要な項目だけを UI 化し、残りは設定ファイル管理に残します。ジョブ開始時のスナップショット保存は API 側で行います。"
-        badge="Settings"
-      />
-      <Panel title="Runtime Settings" copy="LM Studio 接続と評価閾値の最小構成">
-        <p className="panel-copy" style={{ marginBottom: 16 }}>
-          設定変更は既存ジョブへ後付け反映されません。新しい解析ジョブで snapshot され、既存結果は必要に応じて stale として再解析します。
+      <Hero title="Settings" />
+      <Panel title="Runtime Settings">
+        <p className="panel-copy" style={{ marginBottom: 12 }}>
+          Settings apply to new jobs only. Existing results are not retroactively updated.
         </p>
-        <div className="field-grid">
+        <div className="settings-section">
+          <p className="settings-section-title">AI Provider</p>
+          <div className="field-grid">
           <div className="field">
-            <label htmlFor="ai_provider">ai_provider</label>
+            <label htmlFor="ai_provider">AI Provider</label>
             <select id="ai_provider" value={provider} onChange={(event) => handleProviderChange(event.target.value as "lm_studio" | "openrouter")}>
               <option value="lm_studio">lm_studio</option>
               <option value="openrouter">openrouter</option>
             </select>
           </div>
-          {runtimeKeys.map((key) => (
+          {["ai_base_url", "ai_model_name"].map((key) => (
             <div className="field" key={key}>
               <label htmlFor={key}>{key}</label>
-              {key === "allow_remote_ai" ? (
-                <select id={key} value={form[key] ?? "false"} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))}>
-                  <option value="false">false</option>
-                  <option value="true">true</option>
-                </select>
-              ) : (
-                <input id={key} value={form[key] ?? ""} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} />
-              )}
+              <input id={key} value={form[key] ?? ""} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} />
             </div>
           ))}
+          {provider === "openrouter" ? (
+            <div className="field">
+              <label htmlFor="allow_remote_ai">allow_remote_ai</label>
+              <select id="allow_remote_ai" value={form.allow_remote_ai ?? "false"} onChange={(event) => setForm((current) => ({ ...current, allow_remote_ai: event.target.value }))}>
+                <option value="false">false</option>
+                <option value="true">true</option>
+              </select>
+            </div>
+          ) : null}
+          {provider === "openrouter" ? (
+            <p className="panel-copy" style={{ gridColumn: "1 / -1" }}>
+              API key: <code>SKYSORT_AI_API_KEY</code>
+            </p>
+          ) : null}
+          </div>
+        </div>
+        <div className="settings-section" style={{ marginTop: 16 }}>
+          <p className="settings-section-title">Processing</p>
+          <div className="field-grid">
+          {["ai_concurrency", "image_processing_concurrency", "similarity_threshold", "time_proximity_seconds", "candidate_limit", "thumbnail_size", "preview_size", "compare_preview_size", "preview_jpeg_quality", "highlight_threshold", "shadow_threshold", "exiftool_path"].map((key) => (
+            <div className="field" key={key}>
+              <label htmlFor={key}>{key.replace(/_/g, " ")}</label>
+              <input id={key} value={form[key] ?? ""} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} />
+            </div>
+          ))}
+          </div>
+        </div>
+        <div className="settings-section" style={{ marginTop: 16 }}>
+          <p className="settings-section-title">Score Weights</p>
+          <div className="field-grid">
           {weightKeys.map((key) => {
             const fieldKey = `weights.${key}`;
             return (
               <div className="field" key={fieldKey}>
-                <label htmlFor={fieldKey}>{fieldKey}</label>
+                <label htmlFor={fieldKey}>{key.replace(/_/g, " ")}</label>
                 <input id={fieldKey} value={form[fieldKey] ?? ""} onChange={(event) => setForm((current) => ({ ...current, [fieldKey]: event.target.value }))} />
               </div>
             );
           })}
+          </div>
+        </div>
+        <div className="settings-section" style={{ marginTop: 16 }}>
+          <p className="settings-section-title">Rating Thresholds (0–100)</p>
+          <div className="field-grid">
           {thresholdKeys.map((key) => {
             const fieldKey = `rating_thresholds.${key}`;
             return (
               <div className="field" key={fieldKey}>
-                <label htmlFor={fieldKey}>{fieldKey}</label>
+                <label htmlFor={fieldKey}>{key.replace(/_/g, " ")}</label>
                 <input id={fieldKey} value={form[fieldKey] ?? ""} onChange={(event) => setForm((current) => ({ ...current, [fieldKey]: event.target.value }))} />
               </div>
             );
           })}
+          </div>
         </div>
-        {provider === "openrouter" ? (
-          <p className="panel-copy" style={{ marginTop: 16 }}>
-            API key is read from env via <code>SKYSORT_AI_API_KEY</code>. Optional OpenRouter headers use <code>SKYSORT_AI_REFERER</code> and <code>SKYSORT_AI_TITLE</code>.
-          </p>
-        ) : null}
         <div className="actions" style={{ marginTop: 20 }}>
           <button
             className="button"

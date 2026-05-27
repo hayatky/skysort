@@ -58,10 +58,8 @@ export function GroupDetailRoute() {
   return (
     <>
       <Hero
-        title="Frame-by-frame burst review."
-        copy="グループ詳細ではショートカットを優先し、AI 未完了でも暫定評価を維持します。"
-        badge="Group Detail"
-        right={<div className="pill">1-5 / X / P / arrows / Space</div>}
+        title="Group Detail"
+        right={<div className="pill">1-5 / X / P / ← → / Space</div>}
       />
       <div className="review-layout">
         <Panel title={group.data?.id ?? "Group"} copy={`${group.data?.photos.length ?? 0} photos`} actions={actionButtons}>

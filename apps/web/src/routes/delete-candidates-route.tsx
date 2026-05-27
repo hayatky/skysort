@@ -16,9 +16,7 @@ export function DeleteCandidatesRoute() {
   return (
     <>
       <Hero
-        title="Delete candidate review."
-        copy="reject と低評価を分けて確認し、削除候補から戻す操作を短い導線にします。"
-        badge="Delete Candidates"
+        title="Delete Candidates"
         right={<div className="pill">{photos.data?.total ?? items.length} candidates</div>}
       />
       <Panel title="Candidates" copy={`${items.length} loaded`}>

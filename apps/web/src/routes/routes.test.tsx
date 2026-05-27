@@ -104,7 +104,7 @@ describe("route rendering", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Burst intake with local AI preflight.");
+    expect(markup).toContain("Import");
     expect(markup).toContain("qwen");
   });
 
@@ -115,7 +115,7 @@ describe("route rendering", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Pipeline telemetry for long local runs.");
+    expect(markup).toContain("Progress");
     expect(markup).toContain("broken metadata");
     expect(markup).toContain("alpha.jpg");
     expect(markup).toContain("Retryable");
@@ -133,7 +133,7 @@ describe("route rendering", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Frame-by-frame burst review.");
+    expect(markup).toContain("Group Detail");
     expect(markup).toContain("alpha.jpg");
     expect(markup).toContain("best angle");
     expect(markup).toContain("Stale settings_changed");
@@ -159,13 +159,13 @@ describe("route rendering", () => {
     );
 
     expect(groupsMarkup).toContain("Merge Groups");
-    expect(reviewMarkup).toContain("Global review for star tiers and reject lanes.");
+    expect(reviewMarkup).toContain("Review");
     expect(reviewMarkup).toContain("alpha.jpg");
     expect(reviewMarkup).toContain("/groups/group_1?job=job_123");
     expect(reviewMarkup).toContain("Stale");
     expect(reviewMarkup).toContain("Missing");
     expect(reviewMarkup).toContain("AI Failed");
-    expect(exportMarkup).toContain("Dry-run first, then commit metadata writes.");
+    expect(exportMarkup).toContain("Export");
     expect(exportMarkup).toContain("/tmp/export.csv");
     expect(exportMarkup).toContain("Conflict Policy");
     expect(exportMarkup).toContain("Conflicts");
@@ -179,7 +179,7 @@ describe("route rendering", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Delete candidate review.");
+    expect(markup).toContain("Delete Candidates");
     expect(markup).toContain("★1");
     expect(markup).toContain("Remove Candidate");
     expect(markup).toContain("Confirm Reject");
@@ -210,6 +210,6 @@ describe("route rendering", () => {
     expect(markup).toContain("rating_thresholds.reject");
     expect(markup).toContain("allow_remote_ai");
     expect(markup).toContain("SKYSORT_AI_API_KEY");
-    expect(markup).toContain("設定変更は既存ジョブへ後付け反映されません");
+    expect(markup).toContain("Settings apply to new jobs only.");
   });
 });

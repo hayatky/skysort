@@ -20,9 +20,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-kicker">Local Photo Culling</div>
         <div className="brand-title">SkySort</div>
-        <div className="brand-subtitle">Aviation burst review cockpit for local VLM culling.</div>
       </div>
       <nav className="nav">
         {links.map((link) => (

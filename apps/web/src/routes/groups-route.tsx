@@ -42,9 +42,7 @@ export function GroupsRoute() {
   return (
     <>
       <Hero
-        title="Burst groups sorted for human review."
-        copy="Phase 1 では結合・分割を実装せず、未確認グループを先に潰せる一覧に集中します。"
-        badge="Group Overview"
+        title="Groups"
         right={<Link className="button" to={`/review?job=${jobId}`}>Global Review</Link>}
       />
 

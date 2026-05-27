@@ -27,13 +27,11 @@ export function ImportRoute() {
   return (
     <>
       <Hero
-        title="Burst intake with local AI preflight."
-        copy="取り込み前に LM Studio 疎通を確認し、そのまま解析を起動します。MVP ではパス入力を正本にし、フォルダ選択ダイアログには依存しません。"
-        badge="Phase 1 Intake"
+        title="Import"
         right={<StatGrid items={healthSummary} />}
       />
 
-      <Panel title="Import Folder" copy="ARW / JPEG / PNG を対象に再帰走査します。">
+      <Panel title="Import Folder">
         <div className="field-grid">
           <div className="field">
             <label htmlFor="rootPath">Root Path</label>
@@ -76,7 +74,7 @@ export function ImportRoute() {
         </div>
       </Panel>
 
-      <Panel title="AI Health" copy="解析開始前の必須チェックです。未起動ならここで止めます。">
+      <Panel title="AI Health">
         <div className="score-row">
           <span className={`pill`}>{health.data?.reachable ? "reachable" : "offline"}</span>
           <span className="pill">{health.data?.configured_model_exists ? "model ready" : "model missing"}</span>
