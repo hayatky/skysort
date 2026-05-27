@@ -3,10 +3,10 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from skysort_api.infra.ai_client import AIHealthResult
 from skysort_api.infra.models import Job
 from skysort_api.main import create_app
 from skysort_api.infra.settings import get_runtime_settings
@@ -45,7 +45,7 @@ def test_ai_health_route_returns_provider_fields(isolated_runtime, monkeypatch) 
     monkeypatch.setattr(
         router_module,
         "get_ai_health_service",
-        lambda: SimpleNamespace(
+        lambda: AIHealthResult(
             provider="openrouter",
             reachable=False,
             localhost_only=False,

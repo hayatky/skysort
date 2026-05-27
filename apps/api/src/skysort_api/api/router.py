@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -81,7 +82,9 @@ def retry_failure(job_id: str, failure_id: str, session: Session = Depends(get_s
 
 @router.get("/ai/health", response_model=AIHealthResponse)
 def get_ai_health() -> AIHealthResponse:
-    return AIHealthResponse(**get_ai_health_service().__dict__)
+    result = get_ai_health_service()
+    payload = asdict(result) if is_dataclass(result) else vars(result)
+    return AIHealthResponse(**payload)
 
 
 @router.get("/groups")
