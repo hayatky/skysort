@@ -170,8 +170,9 @@ var/       # 実行時生成物。Git 管理外
 
 現在の日常コマンド:
 
-- バックエンド起動: `./scripts/dev-api.sh`
-- フロントエンド起動: `./scripts/dev-web.sh`
+- バックエンド起動: `pnpm dev:api`
+- バックエンド migration のみ: `pnpm migrate:api`
+- フロントエンド起動: `pnpm dev:web`
 - バックエンド構文確認: `uv run python -m compileall -q apps/api/src`
 - バックエンドテスト: `uv run --project apps/api pytest`
 - OpenAPI/client 更新: `pnpm generate:client`

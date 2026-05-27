@@ -23,20 +23,20 @@ var/      runtime outputs (cache, DB, logs, tmp)
 
 Recommended startup order:
 
-1. Start LM Studio and load the configured model, or export OpenRouter settings.
+1. Copy `.env.example` to `.env`, then adjust the AI settings if you are not using the LM Studio defaults.
 2. Start the API.
 3. Start the web app.
 
 OpenRouter example:
 
-```bash
-export SKYSORT_AI_PROVIDER=openrouter
-export SKYSORT_AI_BASE_URL=https://openrouter.ai/api/v1
-export SKYSORT_AI_MODEL_NAME=openai/gpt-5-nano
-export SKYSORT_ALLOW_REMOTE_AI=true
-export SKYSORT_AI_API_KEY=your_api_key
-export SKYSORT_AI_REFERER=https://example.com/skysort
-export SKYSORT_AI_TITLE=SkySort
+```dotenv
+SKYSORT_AI_PROVIDER=openrouter
+SKYSORT_AI_BASE_URL=https://openrouter.ai/api/v1
+SKYSORT_AI_MODEL_NAME=openai/gpt-5-nano
+SKYSORT_ALLOW_REMOTE_AI=true
+SKYSORT_AI_API_KEY=your_api_key
+SKYSORT_AI_REFERER=https://example.com/skysort
+SKYSORT_AI_TITLE=SkySort
 ```
 
 ## Backend Setup
@@ -44,9 +44,13 @@ export SKYSORT_AI_TITLE=SkySort
 ```bash
 cd /path/to/skysort
 uv sync --project apps/api
-uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
-./scripts/dev-api.sh
+pnpm migrate:api
+pnpm dev:api
 ```
+
+`pnpm dev:api` loads `.env` automatically, applies the latest Alembic migration, and then starts the FastAPI dev server.
+
+If you only want to apply the database migration without starting the server, run `pnpm migrate:api`.
 
 API defaults:
 
@@ -72,12 +76,17 @@ Important runtime behavior:
 - AI responses must include `schema_version` and the expected typed ranking/drop-candidate structure before values are applied
 - `image_processing_concurrency` controls preview, metadata, and technical-score workers; `ai_concurrency` controls single-image AI calls while DB writes remain serialized
 
+Windows note:
+
+- Install ExifTool separately when you want real XMP write-back.
+- If `exiftool` is not on `PATH`, set `SKYSORT_EXIFTOOL_PATH` in `.env` to the full executable path.
+
 ## Frontend Setup
 
 ```bash
 cd /path/to/skysort
 pnpm install
-./scripts/dev-web.sh
+pnpm dev:web
 ```
 
 The Vite dev server runs on `http://127.0.0.1:5173` and proxies `/api` to the backend on port `8000`.

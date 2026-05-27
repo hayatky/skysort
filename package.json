@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.11.0",
   "scripts": {
+    "dev:api": "node scripts/dev-api.mjs",
     "dev:web": "pnpm --filter @skysort/web dev",
+    "migrate:api": "node scripts/dev-api.mjs --migrate-only",
     "build:web": "pnpm --filter @skysort/web build",
     "test:web": "pnpm --filter @skysort/web test",
     "lint:web": "pnpm --filter @skysort/web lint",
