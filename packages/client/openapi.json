@@ -2078,6 +2078,14 @@
             "type": "boolean",
             "title": "Allow Remote Ai"
           },
+          "ai_timeout_seconds": {
+            "type": "number",
+            "title": "Ai Timeout Seconds"
+          },
+          "ai_max_tokens": {
+            "type": "integer",
+            "title": "Ai Max Tokens"
+          },
           "ai_concurrency": {
             "type": "integer",
             "title": "Ai Concurrency"
@@ -2143,6 +2151,8 @@
           "ai_base_url",
           "ai_model_name",
           "allow_remote_ai",
+          "ai_timeout_seconds",
+          "ai_max_tokens",
           "ai_concurrency",
           "image_processing_concurrency",
           "similarity_threshold",
@@ -2210,6 +2220,28 @@
               }
             ],
             "title": "Allow Remote Ai"
+          },
+          "ai_timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Timeout Seconds"
+          },
+          "ai_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Max Tokens"
           },
           "ai_concurrency": {
             "anyOf": [

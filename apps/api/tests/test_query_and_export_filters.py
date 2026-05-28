@@ -65,6 +65,9 @@ def _seed_evaluation(
     best_cut_flag: bool = False,
     reviewed_flag: bool = False,
     evaluation_status: str = "final",
+    ai_confidence_score: float | None = None,
+    problem_tags: list[str] | None = None,
+    user_override_flag: bool = False,
 ) -> PhotoEvaluation:
     now = datetime.now(timezone.utc)
     return PhotoEvaluation(
@@ -85,7 +88,9 @@ def _seed_evaluation(
         best_cut_flag=best_cut_flag,
         reviewed_flag=reviewed_flag,
         ai_reason="seeded",
-        user_override_flag=False,
+        ai_confidence_score=ai_confidence_score,
+        problem_tags_json=json.dumps(problem_tags or []),
+        user_override_flag=user_override_flag,
         stale_flag=False,
         stale_reason=None,
         version=1,
@@ -126,8 +131,8 @@ def _seed_filter_dataset(db_session, tmp_path: Path) -> None:
                 representative_photo_id="photo_pick",
                 best_photo_id="photo_pick",
                 group_size=1,
-                group_start_time=now,
-                group_end_time=now,
+                group_start_time=now + timedelta(seconds=6),
+                group_end_time=now + timedelta(seconds=6),
                 stale_flag=True,
                 stale_reason="settings_changed",
                 created_at=now,
@@ -145,7 +150,18 @@ def _seed_filter_dataset(db_session, tmp_path: Path) -> None:
     repo = EvaluationRepository(db_session)
     repo.add_evaluation(_seed_evaluation("photo_keep", "group_a", rating=5, best_cut_flag=True, reviewed_flag=True))
     repo.add_evaluation(_seed_evaluation("photo_reject", "group_a", rating=None, selection_status="rejected"))
-    repo.add_evaluation(_seed_evaluation("photo_pick", "group_b", rating=4, pick_flag=True, reviewed_flag=True, evaluation_status="ai_eval_failed"))
+    repo.add_evaluation(
+        _seed_evaluation(
+            "photo_pick",
+            "group_b",
+            rating=4,
+            pick_flag=True,
+            reviewed_flag=True,
+            evaluation_status="ai_eval_failed",
+            ai_confidence_score=0.3,
+            problem_tags=["motion_blur"],
+        )
+    )
     db_session.flush()
 
 
@@ -162,10 +178,35 @@ def test_list_groups_filters_sorts_and_paginates(db_session, tmp_path: Path) -> 
     )
 
     assert response["total"] == 2
+    assert response["review_summary"]["total_groups"] == 2
+    assert response["review_summary"]["unresolved_groups"] == 2
     assert response["page"] == 1
     assert response["page_size"] == 1
     assert response["total_pages"] == 2
     assert [item["id"] for item in response["items"]] == ["group_a"]
+
+
+def test_list_groups_filters_review_queues_and_group_properties(db_session, tmp_path: Path) -> None:
+    _seed_filter_dataset(db_session, tmp_path)
+    group_a = db_session.get(Group, "group_a")
+    group_a.merge_suggested = True
+    group_a.best_photo_id = None
+    db_session.flush()
+
+    merge_queue = list_groups(db_session, "job_filters", filter_query=json.dumps({"review_queue": "merge_suggested"}))
+    ai_failed_queue = list_groups(db_session, "job_filters", filter_query=json.dumps({"review_queue": "ai_failed"}))
+    singleton = list_groups(db_session, "job_filters", filter_query=json.dumps({"singleton": True}))
+    best_missing = list_groups(db_session, "job_filters", filter_query=json.dumps({"best_missing": True}))
+    size_range = list_groups(db_session, "job_filters", filter_query=json.dumps({"min_group_size": 2, "max_group_size": 2}))
+    adjacent_gap = list_groups(db_session, "job_filters", filter_query=json.dumps({"adjacent_gap_max": 8}))
+
+    assert [item["id"] for item in merge_queue["items"]] == ["group_a"]
+    assert [item["id"] for item in ai_failed_queue["items"]] == ["group_b"]
+    assert [item["id"] for item in singleton["items"]] == ["group_b"]
+    assert [item["id"] for item in best_missing["items"]] == ["group_a"]
+    assert [item["id"] for item in size_range["items"]] == ["group_a"]
+    assert [item["id"] for item in adjacent_gap["items"]] == ["group_b"]
+    assert adjacent_gap["items"][0]["previous_gap_seconds"] == 6
 
 
 def test_export_results_applies_filters(db_session, tmp_path: Path) -> None:
@@ -182,10 +223,59 @@ def test_list_photos_keeps_ai_eval_failed_items_reviewable(db_session, tmp_path:
     _seed_filter_dataset(db_session, tmp_path)
 
     response = list_photos(db_session, "job_filters", filters={"evaluation_status": "ai_eval_failed"})
+    queue_response = list_photos(db_session, "job_filters", filters={"review_queue": "ai_failed"})
 
     assert response["total"] == 1
     assert response["items"][0]["photo_id"] == "photo_pick"
     assert response["items"][0]["rating"] == 4
+    assert response["items"][0]["review_queue"] == "ai_failed"
+    assert response["items"][0]["review_priority"] == 90
+    assert queue_response["total"] == 1
+    assert queue_response["items"][0]["photo_id"] == "photo_pick"
+
+
+def test_list_photos_filters_ai_complete_items(db_session, tmp_path: Path) -> None:
+    _seed_filter_dataset(db_session, tmp_path)
+
+    complete = list_photos(db_session, "job_filters", filters={"ai_complete": True})
+    incomplete = list_photos(db_session, "job_filters", filters={"ai_complete": False})
+
+    assert {item["photo_id"] for item in complete["items"]} == {"photo_keep", "photo_reject"}
+    assert [item["photo_id"] for item in incomplete["items"]] == ["photo_pick"]
+
+
+def test_list_photos_filters_low_confidence_and_problem_tags(db_session, tmp_path: Path) -> None:
+    _seed_filter_dataset(db_session, tmp_path)
+    repo = EvaluationRepository(db_session)
+    current = repo.current_for_photo("photo_pick", "job_filters")
+    current.evaluation_status = "final"
+    db_session.flush()
+
+    low_confidence = list_photos(db_session, "job_filters", filters={"review_queue": "low_confidence"})
+    by_tag = list_photos(db_session, "job_filters", filters={"problem_tag": "motion_blur"})
+    by_confidence = list_photos(db_session, "job_filters", filters={"ai_confidence_max": 0.4})
+
+    assert [item["photo_id"] for item in low_confidence["items"]] == ["photo_pick"]
+    assert low_confidence["items"][0]["review_priority"] == 85
+    assert low_confidence["items"][0]["problem_tags"] == ["motion_blur"]
+    assert [item["photo_id"] for item in by_tag["items"]] == ["photo_pick"]
+    assert [item["photo_id"] for item in by_confidence["items"]] == ["photo_pick"]
+
+
+def test_list_photos_filters_recommendations_and_user_overrides(db_session, tmp_path: Path) -> None:
+    _seed_filter_dataset(db_session, tmp_path)
+    repo = EvaluationRepository(db_session)
+    current = repo.current_for_photo("photo_keep", "job_filters")
+    current.user_override_flag = True
+    db_session.flush()
+
+    keep_recommendation = list_photos(db_session, "job_filters", filters={"keep_recommendation": True})
+    reject_recommendation = list_photos(db_session, "job_filters", filters={"reject_recommendation": True})
+    user_overrides = list_photos(db_session, "job_filters", filters={"user_override_only": True})
+
+    assert [item["photo_id"] for item in keep_recommendation["items"]] == ["photo_pick"]
+    assert [item["photo_id"] for item in reject_recommendation["items"]] == ["photo_reject"]
+    assert [item["photo_id"] for item in user_overrides["items"]] == ["photo_keep"]
 
 
 def test_list_photos_filters_delete_candidates_and_paginates(db_session, tmp_path: Path) -> None:

@@ -37,15 +37,27 @@
 
 ## Benchmark Diff
 
-- Copy `docs/benchmark-expectations.example.json` and fill expected best/reject/pick entries.
+- Copy `docs/benchmark-expectations.example.json` and fill 10 to 20 representative bursts with expected best/reject/pick entries.
+- Set `human_verified=true` only after visual review; machine-generated drafts must remain `human_verified=false`.
+- Optionally run `python scripts/benchmark_seed.py --db var/data/skysort.db --limit 20 --output var/tmp/benchmark-expectations-draft.json` to create a draft from a completed job, then use the generated `var/tmp/benchmark-expectations-draft.html` thumbnail review page to visually verify and edit every expected value.
+- If a current-code rescored diagnostics fixture exists, run `python scripts/benchmark_seed.py --db var/data/skysort.db --limit 20 --score-fixture var/tmp/realdata-rescored-diagnostics-fixture.json --output docs/benchmark-expectations.current-code-draft.json --html-output var/tmp/benchmark-expectations-current-code-draft.html --strip-review-items` to maintain a docs-compatible machine draft without local file review metadata.
+- Prefer `match.relative_paths` for every burst so group over-fragment and over-merge metrics can be computed.
 - Export JSON results from `POST /api/export/results`.
 - Run `python scripts/benchmark_diff.py --expectations <expectations.json> --results <results.json> --root <import-root> --output-dir var/tmp`.
 - Review generated JSON, CSV, and Markdown reports under `var/tmp`.
+- Confirm the report metrics: `best_match_rate`, `reject_recall`, `missing_pick_count`, `unexpected_pick_count`, `group_overfragmented_count`, `group_overmerged_count`, `ai_failure_rate`, and `review_operation_count`.
+- When persisted technical scores are from an old job, run `uv run --project apps/api python scripts/grouping_validate.py --db var/data/skysort.db --output-dir var/tmp --stem realdata-rescored-diagnostics --write-fixture --rescore-technical` to generate non-destructive current-code rating evidence from the DB photo paths.
+- Review the same diagnostics report for replay-adjusted JSON/schema failure projections; stored failed responses that normalize successfully should lower the projected current-code failure rate before a fresh AI run.
+- Run `python scripts/acceptance_gate.py --baseline-diagnostics var/tmp/baseline-diagnostics.json --diagnostics var/tmp/fresh-diagnostics.json --benchmark-diff var/tmp/benchmark-diff.json --review-packet var/tmp/human-review-packet.json --timeout-probe var/tmp/ai-timeout-probe.json --output-dir var/tmp` to summarize pass/fail/review-needed status for the remaining real-data acceptance gates. The baseline argument should point to the old run when validating reduced rating, JSON failure, and timeout rates.
+- Run `uv run --project apps/api python scripts/review_montages.py --review-html var/tmp/benchmark-expectations-current-code-draft.html --output-dir var/tmp/human-review-montages`, then run `python scripts/human_review_packet.py --expectations docs/benchmark-expectations.current-code-draft.json --benchmark-diff var/tmp/benchmark-current-code-draft-diff.json --acceptance-gate var/tmp/acceptance-gate.json --review-html var/tmp/benchmark-expectations-current-code-draft.html --review-montage-dir var/tmp/human-review-montages --diagnostics var/tmp/realdata-rescored-diagnostics.json --output-dir var/tmp` to produce the final human-review checklist and static HTML review form for over-merge and subjective benchmark evidence. Timeout rerun instructions appear only while the current acceptance gate still fails `ai_timeout_rate`.
+- After editing the packet JSON, run `python scripts/human_review_packet.py --validate-packet var/tmp/human-review-packet.json`. If ready, run `python scripts/human_review_packet.py --apply-reviewed var/tmp/human-review-packet.json --expectations docs/benchmark-expectations.current-code-draft.json --output-expectations docs/benchmark-expectations.verified.json`, then rerun benchmark diff and acceptance gate against the verified expectation file.
+- For timeout smoke testing, run `python scripts/ai_timeout_probe.py --db var/data/skysort.db --diagnostics var/tmp/realdata-rescored-diagnostics.json --limit 10 --payload-mode current --output-dir var/tmp` first, then rerun with `uv run --project apps/api python scripts/ai_timeout_probe.py --db var/data/skysort.db --diagnostics var/tmp/realdata-rescored-diagnostics.json --limit 10 --payload-mode current --timeout-seconds 60 --execute --output-dir var/tmp` when the local VLM is available. The execute path refuses non-localhost AI endpoints unless `--allow-remote-ai-probe` is explicitly supplied.
 
 ## Manual Review In UI
 
 - Progress failures show stage, file/photo/group target, reason, and retryability.
 - Global Review shows stale, missing, and AI failed counts and filters.
+- Global Review includes an AI Complete filter backed by `ai_complete=true` so final AI-scored items can be reviewed separately from provisional items.
 - Group and Global Review filters are backed by API requests and expose page controls.
 - Group Detail shows stale reason, missing status, AI failed status, and reanalysis actions.
 - Settings explains that changes are snapshotted only into new analysis jobs.

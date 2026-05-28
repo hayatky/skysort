@@ -141,6 +141,15 @@ export function ReviewRoute() {
               <option value="stale">Stale</option>
               <option value="missing">Missing</option>
               <option value="ai_failed">AI Failed</option>
+              <option value="queue:ai_failed">AI Failure Queue</option>
+              <option value="queue:low_confidence">Low Confidence Queue</option>
+              <option value="queue:stale">Stale Queue</option>
+              <option value="queue:reject_candidate">Reject Queue</option>
+              <option value="queue:ai_review">AI Review Queue</option>
+              <option value="ai_complete">AI Complete</option>
+              <option value="user_override">User Overrides</option>
+              <option value="problem:motion_blur">Motion Blur Tag</option>
+              <option value="problem:bad_crop">Bad Crop Tag</option>
             </select>
           </div>
         </div>
@@ -179,10 +188,13 @@ export function ReviewRoute() {
                   <span className="score-chip">{formatRating(selected.rating, selected.selection_status)}</span>
                   <span className="score-chip">Tech {formatScore(selected.technical_score_total)}</span>
                   <span className="score-chip">AI {formatScore(selected.semantic_score)}</span>
+                  {selected.ai_confidence_score != null ? <span className="score-chip">Confidence {formatConfidence(selected.ai_confidence_score)}</span> : null}
                   {selected.pick_flag ? <span className="score-chip">Pick</span> : null}
                   {selected.best_cut_flag ? <span className="score-chip">Best Cut</span> : null}
                   {selected.reviewed_flag ? <span className="score-chip">Reviewed</span> : null}
                   {selected.stale_flag ? <span className="score-chip">Stale {selected.stale_reason ?? ""}</span> : null}
+                  {selected.review_queue === "low_confidence" ? <span className="score-chip">Low Confidence</span> : null}
+                  {selected.problem_tags?.map((tag) => <span key={tag} className="score-chip">{tag}</span>)}
                 </div>
                 {selected.ai_reason ? <p className="panel-copy">{selected.ai_reason}</p> : null}
                 <div className="rating-controls" aria-label="Rating controls">
@@ -249,9 +261,11 @@ function ReviewListRow({ photo, active, onSelect }: { photo: PhotoReviewItem; ac
         <div className="review-row-meta">
           <span>Tech {formatScore(photo.technical_score_total)}</span>
           <span>AI {formatScore(photo.semantic_score)}</span>
+          {photo.ai_confidence_score != null ? <span>Conf {formatConfidence(photo.ai_confidence_score)}</span> : null}
           <span>{photo.evaluation_status}</span>
           {photo.is_missing ? <span>Missing</span> : null}
           {photo.stale_flag ? <span>Stale</span> : null}
+          {photo.review_queue && photo.review_queue !== "reviewed" ? <span>{photo.review_queue}</span> : null}
           {photo.pick_flag ? <span>Pick</span> : null}
           {photo.best_cut_flag ? <span>Best Cut</span> : null}
           {photo.reviewed_flag ? <span>Reviewed</span> : null}
@@ -271,8 +285,16 @@ function photoFilterPayload(filter: string): Record<string, unknown> {
   if (filter === "stale") return { stale: true };
   if (filter === "missing") return { is_missing: true };
   if (filter === "ai_failed") return { evaluation_status: "ai_eval_failed" };
+  if (filter === "ai_complete") return { ai_complete: true };
+  if (filter.startsWith("queue:")) return { review_queue: filter.split(":")[1] };
+  if (filter.startsWith("problem:")) return { problem_tag: filter.split(":")[1] };
+  if (filter === "user_override") return { user_override_only: true };
   if (filter.startsWith("star:")) return { rating: Number(filter.split(":")[1]) };
   return {};
+}
+
+function formatConfidence(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function withSearchAndDates(filter: Record<string, unknown>, search: string, dateFrom: string, dateTo: string): Record<string, unknown> {

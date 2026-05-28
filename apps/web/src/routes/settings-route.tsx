@@ -9,6 +9,8 @@ export function SettingsRoute() {
   const updateSettings = useUpdateSettings();
   const [form, setForm] = useState<Record<string, string>>({});
   const baseEditableKeys = [
+    "ai_timeout_seconds",
+    "ai_max_tokens",
     "ai_concurrency",
     "image_processing_concurrency",
     "similarity_threshold",
@@ -102,7 +104,7 @@ export function SettingsRoute() {
         <div className="settings-section" style={{ marginTop: 16 }}>
           <p className="settings-section-title">Processing</p>
           <div className="field-grid">
-          {["ai_concurrency", "image_processing_concurrency", "similarity_threshold", "time_proximity_seconds", "candidate_limit", "thumbnail_size", "preview_size", "compare_preview_size", "preview_jpeg_quality", "highlight_threshold", "shadow_threshold", "exiftool_path"].map((key) => (
+          {baseEditableKeys.map((key) => (
             <div className="field" key={key}>
               <label htmlFor={key}>{key.replace(/_/g, " ")}</label>
               <input id={key} value={form[key] ?? ""} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} />
@@ -148,6 +150,8 @@ export function SettingsRoute() {
                 ai_base_url: form.ai_base_url,
                 ai_model_name: form.ai_model_name,
                 allow_remote_ai: form.allow_remote_ai === "true",
+                ai_timeout_seconds: Number(form.ai_timeout_seconds),
+                ai_max_tokens: Number(form.ai_max_tokens),
                 ai_concurrency: Number(form.ai_concurrency),
                 image_processing_concurrency: Number(form.image_processing_concurrency),
                 similarity_threshold: Number(form.similarity_threshold),

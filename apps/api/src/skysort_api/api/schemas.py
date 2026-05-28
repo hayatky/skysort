@@ -179,6 +179,8 @@ class SettingsResponse(BaseModel):
     ai_base_url: str
     ai_model_name: str
     allow_remote_ai: bool
+    ai_timeout_seconds: float
+    ai_max_tokens: int
     ai_concurrency: int
     image_processing_concurrency: int
     similarity_threshold: float
@@ -214,6 +216,8 @@ class SettingsUpdateRequest(BaseModel):
     ai_base_url: str | None = None
     ai_model_name: str | None = None
     allow_remote_ai: bool | None = None
+    ai_timeout_seconds: float | None = None
+    ai_max_tokens: int | None = None
     ai_concurrency: int | None = None
     image_processing_concurrency: int | None = None
     similarity_threshold: float | None = None

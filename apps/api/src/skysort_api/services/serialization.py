@@ -15,6 +15,7 @@ def photo_to_review_item(
     technical: TechnicalScore | None,
     group_id: str | None = None,
 ) -> dict[str, object]:
+    review_queue, review_priority = _review_queue(evaluation, photo)
     return {
         "photo_id": photo.id,
         "group_id": evaluation.group_id if evaluation and evaluation.group_id else group_id,
@@ -32,6 +33,8 @@ def photo_to_review_item(
         "selection_status": evaluation.selection_status if evaluation else "normal",
         "evaluation_status": evaluation.evaluation_status if evaluation else "provisional",
         "ai_reason": evaluation.ai_reason if evaluation else None,
+        "ai_confidence_score": evaluation.ai_confidence_score if evaluation else None,
+        "problem_tags": json_loads(evaluation.problem_tags_json, []) if evaluation else [],
         "pick_flag": evaluation.pick_flag if evaluation else False,
         "best_cut_flag": evaluation.best_cut_flag if evaluation else False,
         "reviewed_flag": evaluation.reviewed_flag if evaluation else False,
@@ -39,6 +42,12 @@ def photo_to_review_item(
         "stale_flag": evaluation.stale_flag if evaluation else False,
         "stale_reason": evaluation.stale_reason if evaluation else None,
         "technical_score_total": technical.technical_score_total if technical else None,
+        "sharpness_rank": technical.sharpness_rank if technical else None,
+        "exposure_rank": technical.exposure_rank if technical else None,
+        "candidate_quality_score": technical.candidate_quality_score if technical else None,
+        "reject_risk_score": technical.reject_risk_score if technical else None,
+        "review_queue": review_queue,
+        "review_priority": review_priority,
         "semantic_score": evaluation.semantic_score if evaluation else None,
         "composition_score": evaluation.composition_score if evaluation else None,
         "subject_state_score": evaluation.subject_state_score if evaluation else None,
@@ -75,6 +84,24 @@ def job_to_progress(job: Job) -> dict[str, object]:
         "canceled_at": isoformat(job.canceled_at),
         "updated_at": isoformat(job.updated_at),
     }
+
+
+def _review_queue(evaluation: PhotoEvaluation | None, photo: Photo) -> tuple[str, int]:
+    if photo.is_missing:
+        return "missing", 95
+    if evaluation is None:
+        return "unreviewed", 50
+    if evaluation.evaluation_status == "ai_eval_failed":
+        return "ai_failed", 90
+    if evaluation.ai_confidence_score is not None and evaluation.ai_confidence_score < 0.5:
+        return "low_confidence", 85
+    if evaluation.stale_flag:
+        return "stale", 80
+    if evaluation.selection_status == "rejected" or evaluation.rating == 1:
+        return "reject_candidate", 60
+    if not evaluation.reviewed_flag:
+        return "unreviewed", 50
+    return "reviewed", 0
 
 
 def job_to_summary(job: Job) -> dict[str, object]:
@@ -154,6 +181,12 @@ def _stage_label(stage: str) -> str:
 
 def group_to_item(group: Group, photos: list[dict[str, object]]) -> dict[str, object]:
     reviewed_count = sum(1 for photo in photos if photo["reviewed_flag"])
+    review_queue, review_priority = _group_review_queue(group, photos, reviewed_count)
+    confidence_values = [
+        photo["ai_confidence_score"]
+        for photo in photos
+        if isinstance(photo.get("ai_confidence_score"), int | float)
+    ]
     return {
         "id": group.id,
         "job_id": group.job_id,
@@ -163,15 +196,46 @@ def group_to_item(group: Group, photos: list[dict[str, object]]) -> dict[str, ob
         "group_size": group.group_size,
         "group_start_time": isoformat(group.group_start_time),
         "group_end_time": isoformat(group.group_end_time),
+        "boundary_reason": group.boundary_reason,
+        "merge_suggested": group.merge_suggested,
+        "merge_suggestion_reason": group.merge_suggestion_reason,
         "stale_flag": group.stale_flag,
         "stale_reason": group.stale_reason,
         "created_at": isoformat(group.created_at),
         "reviewed_count": reviewed_count,
         "unreviewed_count": max(0, group.group_size - reviewed_count),
+        "review_queue": review_queue,
+        "review_priority": review_priority,
         "technical_score_total": max((photo["technical_score_total"] or 0) for photo in photos) if photos else None,
         "semantic_score": max((photo["semantic_score"] or 0) for photo in photos) if photos else None,
         "composition_score": max((photo["composition_score"] or 0) for photo in photos) if photos else None,
         "subject_state_score": max((photo["subject_state_score"] or 0) for photo in photos) if photos else None,
         "rarity_score": max((photo["rarity_score"] or 0) for photo in photos) if photos else None,
+        "ai_confidence_score": min(confidence_values) if confidence_values else None,
         "items": photos,
     }
+
+
+def _group_review_queue(group: Group, photos: list[dict[str, object]], reviewed_count: int) -> tuple[str, int]:
+    if group.merge_suggested:
+        return "merge_suggested", 92
+    photo_queue = max(
+        ((str(photo.get("review_queue")), int(photo.get("review_priority") or 0)) for photo in photos if photo.get("review_queue") != "reviewed"),
+        key=lambda item: item[1],
+        default=None,
+    )
+    if photo_queue is not None and photo_queue[1] >= 80:
+        return photo_queue
+    if group.stale_flag:
+        return "stale", 80
+    if group.group_size == 1:
+        return "singleton", 70
+    if group.best_photo_id is None:
+        return "best_missing", 65
+    if photo_queue is not None and photo_queue[0] == "reject_candidate":
+        return photo_queue
+    if any(photo.get("evaluation_status") == "final" and not photo.get("reviewed_flag") for photo in photos):
+        return "ai_review", 55
+    if reviewed_count < group.group_size:
+        return "unreviewed", 50
+    return "reviewed", 0

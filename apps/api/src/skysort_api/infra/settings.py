@@ -28,10 +28,10 @@ class WeightSettings(BaseModel):
 
 class RatingThresholds(BaseModel):
     star_5: float = 83.0
-    star_4: float = 78.0
-    star_3: float = 64.0
-    star_2: float = 48.0
-    reject: float = 20.0
+    star_4: float = 74.0
+    star_3: float = 58.0
+    star_2: float = 42.0
+    reject: float = 22.0
 
 
 def default_image_processing_concurrency() -> int:
@@ -51,7 +51,8 @@ class RuntimeSettings(BaseSettings):
     ai_referer: str | None = None
     ai_title: str | None = None
     allow_remote_ai: bool = False
-    ai_timeout_seconds: float = 10.0
+    ai_timeout_seconds: float = 60.0
+    ai_max_tokens: int = 1024
     ai_concurrency: int = 1
     image_processing_concurrency: int = Field(default_factory=default_image_processing_concurrency)
     thumb_size: int = 512
@@ -59,8 +60,8 @@ class RuntimeSettings(BaseSettings):
     preview_size: int = 1024
     compare_preview_size: int = 512
     preview_jpeg_quality: int = 90
-    similarity_threshold: float = 0.86
-    time_proximity_seconds: int = 4
+    similarity_threshold: float = 0.8
+    time_proximity_seconds: int = 8
     candidate_limit: int = 6
     highlight_threshold: int = 252
     shadow_threshold: int = 3
@@ -96,6 +97,8 @@ UI_MUTABLE_FIELDS = {
     "ai_base_url",
     "ai_model_name",
     "allow_remote_ai",
+    "ai_timeout_seconds",
+    "ai_max_tokens",
     "ai_concurrency",
     "image_processing_concurrency",
     "similarity_threshold",

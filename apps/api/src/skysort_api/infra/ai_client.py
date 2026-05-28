@@ -184,7 +184,7 @@ class VisionLanguageModelClient:
         parsed: dict[str, object] | None = None
         raw_text = ""
         retry_count = 0
-        with httpx.Client(base_url=self.settings.ai_base_url, timeout=30.0, headers=self._headers()) as client:
+        with httpx.Client(base_url=self.settings.ai_base_url, timeout=self.settings.ai_timeout_seconds, headers=self._headers()) as client:
             while retry_count <= 2:
                 response = client.post("/chat/completions", json=payload)
                 response.raise_for_status()

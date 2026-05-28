@@ -1,0 +1,785 @@
+{
+  "schema_version": "v1",
+  "human_verified": false,
+  "description": "Draft generated from current SkySort results. Review each burst visually before treating expected_best, expected_reject, or expected_pick as ground truth.",
+  "generated_at": "2026-05-27T19:52:07.705733+00:00",
+  "source": {
+    "job_id": "job_36530e48ab",
+    "score_fixture": "var\\tmp\\realdata-rescored-diagnostics-fixture.json"
+  },
+  "groups": [
+    {
+      "name": "group_28006f4f0c",
+      "match": {
+        "group_id": "group_28006f4f0c",
+        "relative_paths": [
+          "DSC05239.JPG",
+          "DSC05240.JPG",
+          "DSC05241.JPG",
+          "DSC05242.JPG",
+          "DSC05243.JPG",
+          "DSC05244.JPG",
+          "DSC05245.JPG",
+          "DSC05246.JPG",
+          "DSC05247.JPG",
+          "DSC05248.JPG",
+          "DSC05249.JPG",
+          "DSC05250.JPG",
+          "DSC05251.JPG",
+          "DSC05252.JPG",
+          "DSC05253.JPG",
+          "DSC05254.JPG",
+          "DSC05255.JPG",
+          "DSC05256.JPG",
+          "DSC05257.JPG",
+          "DSC05258.JPG",
+          "DSC05259.JPG",
+          "DSC05260.JPG",
+          "DSC05261.JPG",
+          "DSC05262.JPG",
+          "DSC05263.JPG",
+          "DSC05264.JPG",
+          "DSC05265.JPG",
+          "DSC05266.JPG",
+          "DSC05267.JPG",
+          "DSC05268.JPG",
+          "DSC05269.JPG",
+          "DSC05270.JPG"
+        ]
+      },
+      "expected_best": "DSC05248.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC05239.JPG",
+        "DSC05240.JPG",
+        "DSC05241.JPG",
+        "DSC05245.JPG",
+        "DSC05246.JPG",
+        "DSC05247.JPG",
+        "DSC05248.JPG",
+        "DSC05249.JPG",
+        "DSC05250.JPG",
+        "DSC05251.JPG",
+        "DSC05252.JPG",
+        "DSC05253.JPG",
+        "DSC05254.JPG",
+        "DSC05255.JPG",
+        "DSC05256.JPG",
+        "DSC05257.JPG",
+        "DSC05258.JPG",
+        "DSC05259.JPG",
+        "DSC05260.JPG",
+        "DSC05261.JPG",
+        "DSC05262.JPG",
+        "DSC05263.JPG"
+      ],
+      "notes": "Draft candidate: 32 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_8691ddb58c",
+      "match": {
+        "group_id": "group_8691ddb58c",
+        "relative_paths": [
+          "DSC05689.JPG",
+          "DSC05690.JPG",
+          "DSC05691.JPG",
+          "DSC05692.JPG",
+          "DSC05693.JPG",
+          "DSC05694.JPG",
+          "DSC05695.JPG",
+          "DSC05696.JPG",
+          "DSC05697.JPG",
+          "DSC05698.JPG",
+          "DSC05699.JPG",
+          "DSC05700.JPG",
+          "DSC05701.JPG",
+          "DSC05702.JPG",
+          "DSC05703.JPG",
+          "DSC05704.JPG",
+          "DSC05705.JPG",
+          "DSC05706.JPG",
+          "DSC05707.JPG",
+          "DSC05708.JPG",
+          "DSC05709.JPG"
+        ]
+      },
+      "expected_best": "DSC05703.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC05689.JPG",
+        "DSC05690.JPG",
+        "DSC05691.JPG",
+        "DSC05692.JPG",
+        "DSC05693.JPG",
+        "DSC05697.JPG",
+        "DSC05698.JPG",
+        "DSC05699.JPG",
+        "DSC05700.JPG",
+        "DSC05701.JPG",
+        "DSC05702.JPG",
+        "DSC05703.JPG",
+        "DSC05704.JPG",
+        "DSC05705.JPG",
+        "DSC05707.JPG",
+        "DSC05708.JPG",
+        "DSC05709.JPG"
+      ],
+      "notes": "Draft candidate: 21 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_2e7d597c65",
+      "match": {
+        "group_id": "group_2e7d597c65",
+        "relative_paths": [
+          "DSC06207.JPG",
+          "DSC06208.JPG",
+          "DSC06209.JPG",
+          "DSC06210.JPG",
+          "DSC06211.JPG",
+          "DSC06212.JPG",
+          "DSC06213.JPG",
+          "DSC06214.JPG",
+          "DSC06215.JPG",
+          "DSC06216.JPG",
+          "DSC06217.JPG",
+          "DSC06218.JPG",
+          "DSC06219.JPG",
+          "DSC06220.JPG",
+          "DSC06221.JPG",
+          "DSC06222.JPG",
+          "DSC06223.JPG",
+          "DSC06224.JPG",
+          "DSC06225.JPG",
+          "DSC06226.JPG"
+        ]
+      },
+      "expected_best": "DSC06208.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC06207.JPG",
+        "DSC06208.JPG",
+        "DSC06209.JPG",
+        "DSC06210.JPG",
+        "DSC06211.JPG",
+        "DSC06212.JPG",
+        "DSC06213.JPG",
+        "DSC06216.JPG",
+        "DSC06217.JPG",
+        "DSC06218.JPG",
+        "DSC06219.JPG",
+        "DSC06224.JPG",
+        "DSC06225.JPG",
+        "DSC06226.JPG"
+      ],
+      "notes": "Draft candidate: 20 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_ff24adb360",
+      "match": {
+        "group_id": "group_ff24adb360",
+        "relative_paths": [
+          "DSC06092.JPG",
+          "DSC06093.JPG",
+          "DSC06094.JPG",
+          "DSC06095.JPG",
+          "DSC06096.JPG",
+          "DSC06097.JPG",
+          "DSC06098.JPG",
+          "DSC06099.JPG",
+          "DSC06100.JPG",
+          "DSC06101.JPG",
+          "DSC06102.JPG",
+          "DSC06103.JPG",
+          "DSC06104.JPG",
+          "DSC06105.JPG",
+          "DSC06106.JPG",
+          "DSC06107.JPG",
+          "DSC06108.JPG",
+          "DSC06109.JPG",
+          "DSC06110.JPG"
+        ]
+      },
+      "expected_best": "DSC06107.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC06092.JPG",
+        "DSC06093.JPG",
+        "DSC06102.JPG",
+        "DSC06103.JPG",
+        "DSC06104.JPG",
+        "DSC06105.JPG",
+        "DSC06106.JPG",
+        "DSC06107.JPG",
+        "DSC06108.JPG",
+        "DSC06109.JPG",
+        "DSC06110.JPG"
+      ],
+      "notes": "Draft candidate: 19 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_4301841bf2",
+      "match": {
+        "group_id": "group_4301841bf2",
+        "relative_paths": [
+          "DSC04528.JPG",
+          "DSC04529.JPG",
+          "DSC04530.JPG",
+          "DSC04531.JPG",
+          "DSC04532.JPG",
+          "DSC04533.JPG",
+          "DSC04534.JPG",
+          "DSC04535.JPG",
+          "DSC04536.JPG",
+          "DSC04537.JPG",
+          "DSC04538.JPG",
+          "DSC04539.JPG",
+          "DSC04540.JPG",
+          "DSC04541.JPG",
+          "DSC04542.JPG",
+          "DSC04543.JPG",
+          "DSC04544.JPG",
+          "DSC04545.JPG"
+        ]
+      },
+      "expected_best": "DSC04544.JPG",
+      "expected_reject": [
+        "DSC04528.JPG",
+        "DSC04529.JPG",
+        "DSC04534.JPG",
+        "DSC04535.JPG",
+        "DSC04536.JPG",
+        "DSC04537.JPG",
+        "DSC04538.JPG",
+        "DSC04539.JPG"
+      ],
+      "expected_pick": [
+        "DSC04544.JPG",
+        "DSC04545.JPG"
+      ],
+      "notes": "Draft candidate: 18 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_604cef6824",
+      "match": {
+        "group_id": "group_604cef6824",
+        "relative_paths": [
+          "DSC05098.JPG",
+          "DSC05099.JPG",
+          "DSC05100.JPG",
+          "DSC05101.JPG",
+          "DSC05102.JPG",
+          "DSC05103.JPG",
+          "DSC05104.JPG",
+          "DSC05105.JPG",
+          "DSC05106.JPG",
+          "DSC05107.JPG",
+          "DSC05108.JPG",
+          "DSC05109.JPG",
+          "DSC05110.JPG",
+          "DSC05111.JPG",
+          "DSC05112.JPG",
+          "DSC05113.JPG"
+        ]
+      },
+      "expected_best": "DSC05110.JPG",
+      "expected_reject": [
+        "DSC05098.JPG",
+        "DSC05099.JPG",
+        "DSC05100.JPG",
+        "DSC05101.JPG",
+        "DSC05102.JPG",
+        "DSC05103.JPG",
+        "DSC05104.JPG",
+        "DSC05105.JPG",
+        "DSC05111.JPG"
+      ],
+      "expected_pick": [
+        "DSC05110.JPG"
+      ],
+      "notes": "Draft candidate: 16 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_a6f7049fce",
+      "match": {
+        "group_id": "group_a6f7049fce",
+        "relative_paths": [
+          "DSC05745.JPG",
+          "DSC05746.JPG",
+          "DSC05747.JPG",
+          "DSC05748.JPG",
+          "DSC05749.JPG",
+          "DSC05750.JPG",
+          "DSC05751.JPG",
+          "DSC05752.JPG",
+          "DSC05753.JPG",
+          "DSC05754.JPG",
+          "DSC05755.JPG",
+          "DSC05756.JPG",
+          "DSC05757.JPG",
+          "DSC05758.JPG",
+          "DSC05759.JPG"
+        ]
+      },
+      "expected_best": "DSC05745.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC05745.JPG",
+        "DSC05746.JPG",
+        "DSC05747.JPG",
+        "DSC05748.JPG",
+        "DSC05749.JPG",
+        "DSC05750.JPG",
+        "DSC05751.JPG",
+        "DSC05752.JPG",
+        "DSC05753.JPG",
+        "DSC05754.JPG",
+        "DSC05755.JPG"
+      ],
+      "notes": "Draft candidate: 15 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_1e9331623a",
+      "match": {
+        "group_id": "group_1e9331623a",
+        "relative_paths": [
+          "DSC05951.JPG",
+          "DSC05952.JPG",
+          "DSC05953.JPG",
+          "DSC05954.JPG",
+          "DSC05955.JPG",
+          "DSC05956.JPG",
+          "DSC05957.JPG",
+          "DSC05958.JPG",
+          "DSC05959.JPG",
+          "DSC05960.JPG",
+          "DSC05961.JPG",
+          "DSC05962.JPG",
+          "DSC05963.JPG",
+          "DSC05964.JPG",
+          "DSC05965.JPG"
+        ]
+      },
+      "expected_best": "DSC05960.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC05951.JPG",
+        "DSC05952.JPG",
+        "DSC05953.JPG",
+        "DSC05954.JPG",
+        "DSC05955.JPG",
+        "DSC05958.JPG",
+        "DSC05960.JPG",
+        "DSC05961.JPG",
+        "DSC05962.JPG",
+        "DSC05963.JPG",
+        "DSC05964.JPG"
+      ],
+      "notes": "Draft candidate: 15 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_f8fcc68895",
+      "match": {
+        "group_id": "group_f8fcc68895",
+        "relative_paths": [
+          "DSC04220.JPG",
+          "DSC04221.JPG",
+          "DSC04222.JPG",
+          "DSC04223.JPG",
+          "DSC04224.JPG",
+          "DSC04225.JPG",
+          "DSC04226.JPG",
+          "DSC04227.JPG",
+          "DSC04228.JPG",
+          "DSC04229.JPG",
+          "DSC04230.JPG",
+          "DSC04231.JPG",
+          "DSC04232.JPG",
+          "DSC04233.JPG"
+        ]
+      },
+      "expected_best": "DSC04232.JPG",
+      "expected_reject": [
+        "DSC04220.JPG",
+        "DSC04221.JPG",
+        "DSC04227.JPG",
+        "DSC04230.JPG",
+        "DSC04231.JPG"
+      ],
+      "expected_pick": [
+        "DSC04232.JPG"
+      ],
+      "notes": "Draft candidate: 14 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_7b454092be",
+      "match": {
+        "group_id": "group_7b454092be",
+        "relative_paths": [
+          "DSC04558.JPG",
+          "DSC04559.JPG",
+          "DSC04560.JPG",
+          "DSC04561.JPG",
+          "DSC04562.JPG",
+          "DSC04563.JPG",
+          "DSC04564.JPG",
+          "DSC04565.JPG",
+          "DSC04566.JPG",
+          "DSC04567.JPG",
+          "DSC04568.JPG",
+          "DSC04569.JPG",
+          "DSC04570.JPG",
+          "DSC04571.JPG"
+        ]
+      },
+      "expected_best": "DSC04562.JPG",
+      "expected_reject": [
+        "DSC04559.JPG",
+        "DSC04560.JPG",
+        "DSC04568.JPG",
+        "DSC04571.JPG"
+      ],
+      "expected_pick": [
+        "DSC04562.JPG"
+      ],
+      "notes": "Draft candidate: 14 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_0f66a55488",
+      "match": {
+        "group_id": "group_0f66a55488",
+        "relative_paths": [
+          "DSC04639.JPG",
+          "DSC04640.JPG",
+          "DSC04641.JPG",
+          "DSC04642.JPG",
+          "DSC04643.JPG",
+          "DSC04644.JPG",
+          "DSC04645.JPG",
+          "DSC04646.JPG",
+          "DSC04647.JPG",
+          "DSC04648.JPG",
+          "DSC04649.JPG",
+          "DSC04650.JPG",
+          "DSC04651.JPG",
+          "DSC04652.JPG"
+        ]
+      },
+      "expected_best": "DSC04643.JPG",
+      "expected_reject": [
+        "DSC04642.JPG",
+        "DSC04644.JPG",
+        "DSC04650.JPG",
+        "DSC04651.JPG",
+        "DSC04652.JPG"
+      ],
+      "expected_pick": [
+        "DSC04643.JPG"
+      ],
+      "notes": "Draft candidate: 14 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_359f19547c",
+      "match": {
+        "group_id": "group_359f19547c",
+        "relative_paths": [
+          "DSC05048.JPG",
+          "DSC05049.JPG",
+          "DSC05050.JPG",
+          "DSC05051.JPG",
+          "DSC05052.JPG",
+          "DSC05053.JPG",
+          "DSC05054.JPG",
+          "DSC05055.JPG",
+          "DSC05056.JPG",
+          "DSC05057.JPG",
+          "DSC05058.JPG",
+          "DSC05059.JPG",
+          "DSC05060.JPG",
+          "DSC05061.JPG"
+        ]
+      },
+      "expected_best": "DSC05050.JPG",
+      "expected_reject": [
+        "DSC05054.JPG",
+        "DSC05055.JPG",
+        "DSC05057.JPG",
+        "DSC05058.JPG",
+        "DSC05059.JPG",
+        "DSC05060.JPG",
+        "DSC05061.JPG"
+      ],
+      "expected_pick": [
+        "DSC05049.JPG",
+        "DSC05050.JPG"
+      ],
+      "notes": "Draft candidate: 14 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_7bb814d322",
+      "match": {
+        "group_id": "group_7bb814d322",
+        "relative_paths": [
+          "DSC06401.JPG",
+          "DSC06402.JPG",
+          "DSC06403.JPG",
+          "DSC06404.JPG",
+          "DSC06405.JPG",
+          "DSC06406.JPG",
+          "DSC06407.JPG",
+          "DSC06408.JPG",
+          "DSC06409.JPG",
+          "DSC06410.JPG",
+          "DSC06411.JPG",
+          "DSC06412.JPG",
+          "DSC06413.JPG",
+          "DSC06414.JPG"
+        ]
+      },
+      "expected_best": "DSC06410.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC06405.JPG",
+        "DSC06406.JPG",
+        "DSC06408.JPG",
+        "DSC06409.JPG",
+        "DSC06410.JPG",
+        "DSC06411.JPG",
+        "DSC06412.JPG",
+        "DSC06413.JPG",
+        "DSC06414.JPG"
+      ],
+      "notes": "Draft candidate: 14 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_5d80b180ef",
+      "match": {
+        "group_id": "group_5d80b180ef",
+        "relative_paths": [
+          "DSC06648.JPG",
+          "DSC06649.JPG",
+          "DSC06650.JPG",
+          "DSC06651.JPG",
+          "DSC06652.JPG",
+          "DSC06653.JPG",
+          "DSC06654.JPG",
+          "DSC06655.JPG",
+          "DSC06656.JPG",
+          "DSC06657.JPG",
+          "DSC06658.JPG",
+          "DSC06659.JPG",
+          "DSC06660.JPG",
+          "DSC06661.JPG"
+        ]
+      },
+      "expected_best": "DSC06650.JPG",
+      "expected_reject": [
+        "DSC06661.JPG"
+      ],
+      "expected_pick": [
+        "DSC06650.JPG"
+      ],
+      "notes": "Draft candidate: 14 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_8e8dc21351",
+      "match": {
+        "group_id": "group_8e8dc21351",
+        "relative_paths": [
+          "DSC05303.JPG",
+          "DSC05304.JPG",
+          "DSC05305.JPG",
+          "DSC05306.JPG",
+          "DSC05307.JPG",
+          "DSC05308.JPG",
+          "DSC05309.JPG",
+          "DSC05310.JPG",
+          "DSC05311.JPG",
+          "DSC05312.JPG",
+          "DSC05313.JPG",
+          "DSC05314.JPG",
+          "DSC05315.JPG"
+        ]
+      },
+      "expected_best": "DSC05303.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC05303.JPG",
+        "DSC05304.JPG",
+        "DSC05305.JPG",
+        "DSC05306.JPG",
+        "DSC05307.JPG"
+      ],
+      "notes": "Draft candidate: 13 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_0a5391a148",
+      "match": {
+        "group_id": "group_0a5391a148",
+        "relative_paths": [
+          "DSC05613.JPG",
+          "DSC05614.JPG",
+          "DSC05615.JPG",
+          "DSC05616.JPG",
+          "DSC05617.JPG",
+          "DSC05618.JPG",
+          "DSC05619.JPG",
+          "DSC05620.JPG",
+          "DSC05621.JPG",
+          "DSC05622.JPG",
+          "DSC05623.JPG",
+          "DSC05624.JPG",
+          "DSC05625.JPG"
+        ]
+      },
+      "expected_best": "DSC05622.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC05614.JPG",
+        "DSC05615.JPG",
+        "DSC05616.JPG",
+        "DSC05619.JPG",
+        "DSC05620.JPG",
+        "DSC05621.JPG",
+        "DSC05622.JPG",
+        "DSC05623.JPG",
+        "DSC05624.JPG",
+        "DSC05625.JPG"
+      ],
+      "notes": "Draft candidate: 13 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_ba0c4de698",
+      "match": {
+        "group_id": "group_ba0c4de698",
+        "relative_paths": [
+          "DSC05864.JPG",
+          "DSC05865.JPG",
+          "DSC05866.JPG",
+          "DSC05867.JPG",
+          "DSC05868.JPG",
+          "DSC05869.JPG",
+          "DSC05870.JPG",
+          "DSC05871.JPG",
+          "DSC05872.JPG",
+          "DSC05873.JPG",
+          "DSC05874.JPG",
+          "DSC05875.JPG",
+          "DSC05876.JPG"
+        ]
+      },
+      "expected_best": "DSC05873.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC05864.JPG",
+        "DSC05867.JPG",
+        "DSC05868.JPG",
+        "DSC05870.JPG",
+        "DSC05871.JPG",
+        "DSC05872.JPG",
+        "DSC05873.JPG",
+        "DSC05874.JPG",
+        "DSC05875.JPG",
+        "DSC05876.JPG"
+      ],
+      "notes": "Draft candidate: 13 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_7c99006fc0",
+      "match": {
+        "group_id": "group_7c99006fc0",
+        "relative_paths": [
+          "DSC06231.JPG",
+          "DSC06232.JPG",
+          "DSC06233.JPG",
+          "DSC06234.JPG",
+          "DSC06235.JPG",
+          "DSC06236.JPG",
+          "DSC06237.JPG",
+          "DSC06238.JPG",
+          "DSC06239.JPG",
+          "DSC06240.JPG",
+          "DSC06241.JPG",
+          "DSC06242.JPG",
+          "DSC06243.JPG"
+        ]
+      },
+      "expected_best": "DSC06231.JPG",
+      "expected_reject": [],
+      "expected_pick": [
+        "DSC06231.JPG",
+        "DSC06232.JPG",
+        "DSC06233.JPG",
+        "DSC06234.JPG",
+        "DSC06235.JPG",
+        "DSC06236.JPG",
+        "DSC06237.JPG",
+        "DSC06238.JPG",
+        "DSC06239.JPG",
+        "DSC06240.JPG",
+        "DSC06241.JPG"
+      ],
+      "notes": "Draft candidate: 13 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_ceb079fde2",
+      "match": {
+        "group_id": "group_ceb079fde2",
+        "relative_paths": [
+          "DSC03814.JPG",
+          "DSC03815.JPG",
+          "DSC03816.JPG",
+          "DSC03817.JPG",
+          "DSC03818.JPG",
+          "DSC03819.JPG",
+          "DSC03820.JPG",
+          "DSC03821.JPG",
+          "DSC03822.JPG",
+          "DSC03823.JPG",
+          "DSC03824.JPG",
+          "DSC03825.JPG"
+        ]
+      },
+      "expected_best": "DSC03824.JPG",
+      "expected_reject": [
+        "DSC03814.JPG",
+        "DSC03815.JPG",
+        "DSC03816.JPG",
+        "DSC03817.JPG"
+      ],
+      "expected_pick": [
+        "DSC03824.JPG"
+      ],
+      "notes": "Draft candidate: 12 photos; queue_hint=reject_candidate; verify visually before use."
+    },
+    {
+      "name": "group_d37a60d426",
+      "match": {
+        "group_id": "group_d37a60d426",
+        "relative_paths": [
+          "DSC03828.JPG",
+          "DSC03829.JPG",
+          "DSC03830.JPG",
+          "DSC03831.JPG",
+          "DSC03832.JPG",
+          "DSC03833.JPG",
+          "DSC03834.JPG",
+          "DSC03835.JPG",
+          "DSC03836.JPG",
+          "DSC03837.JPG",
+          "DSC03838.JPG",
+          "DSC03839.JPG"
+        ]
+      },
+      "expected_best": "DSC03837.JPG",
+      "expected_reject": [
+        "DSC03836.JPG"
+      ],
+      "expected_pick": [
+        "DSC03837.JPG",
+        "DSC03838.JPG",
+        "DSC03839.JPG"
+      ],
+      "notes": "Draft candidate: 12 photos; queue_hint=reject_candidate; verify visually before use."
+    }
+  ]
+}

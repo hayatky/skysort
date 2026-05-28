@@ -9,6 +9,7 @@ const links: NavLinkItem[] = [
   { path: "/progress", label: "Progress" },
   { path: "/groups", label: "Groups" },
   { path: "/review", label: "Review" },
+  { path: "/burst-review", label: "Burst Review" },
   { path: "/delete-candidates", label: "Delete Candidates" },
   { path: "/export", label: "Export" },
   { path: "/settings", label: "Settings" },

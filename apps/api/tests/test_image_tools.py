@@ -4,7 +4,7 @@ import io
 from pathlib import Path
 from types import SimpleNamespace
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from skysort_api.infra import image_tools
 
@@ -55,3 +55,49 @@ def test_arw_prefers_embedded_preview_for_render_and_metadata(monkeypatch, tmp_p
     assert metadata["capture_timestamp_ms"] is not None
     assert calls["extract_thumb"] >= 2
     assert calls["postprocess"] == 0
+
+
+def test_compute_visual_features_contains_full_hashes_and_histogram(tmp_path: Path) -> None:
+    image_path = tmp_path / "sample.jpg"
+    Image.new("RGB", (64, 64), (120, 80, 40)).save(image_path)
+
+    features = image_tools.compute_visual_features(image_path)
+
+    assert len(str(features["phash"])) == 16
+    assert len(str(features["dhash"])) == 16
+    assert len(str(features["ahash"])) == 16
+    assert len(features["color_histogram"]) == 48
+    assert abs(sum(features["color_histogram"]) - 1.0) < 0.001
+
+
+def test_compute_technical_metrics_spreads_sharp_and_blurred_images(tmp_path: Path) -> None:
+    sharp_path = tmp_path / "sharp.jpg"
+    blur_path = tmp_path / "blur.jpg"
+    image = Image.new("L", (128, 128), 128)
+    for x in range(16, 112, 8):
+        for y in range(16, 112):
+            image.putpixel((x, y), 255 if (x // 8) % 2 else 0)
+    image.convert("RGB").save(sharp_path)
+    image.filter(ImageFilter.GaussianBlur(radius=5)).convert("RGB").save(blur_path)
+
+    sharp = image_tools.compute_technical_metrics(sharp_path, 252, 3)
+    blurred = image_tools.compute_technical_metrics(blur_path, 252, 3)
+
+    assert sharp["sharpness_score"] - blurred["sharpness_score"] > 20
+    assert sharp["motion_blur_score"] > blurred["motion_blur_score"]
+
+
+def test_build_contact_sheet_data_url_labels_photo_ids(tmp_path: Path) -> None:
+    first = tmp_path / "first.jpg"
+    second = tmp_path / "second.jpg"
+    Image.new("RGB", (40, 30), (255, 0, 0)).save(first)
+    Image.new("RGB", (30, 40), (0, 0, 255)).save(second)
+
+    data_url, mapping = image_tools.build_contact_sheet_data_url(
+        [("photo_a", first), ("photo_b", second)],
+        max_side=256,
+        quality=80,
+    )
+
+    assert data_url.startswith("data:image/jpeg;base64,")
+    assert mapping == {"A": "photo_a", "B": "photo_b"}

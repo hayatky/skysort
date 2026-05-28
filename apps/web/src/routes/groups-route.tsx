@@ -54,7 +54,12 @@ export function GroupsRoute() {
     <>
       <Hero
         title="Groups"
-        right={<Link className="button" to={`/review?job=${jobId}`}>Global Review</Link>}
+        right={
+          <div className="actions">
+            <Link className="button" to={`/burst-review?job=${jobId}`}>Burst Review</Link>
+            <Link className="button secondary" to={`/review?job=${jobId}`}>Global Review</Link>
+          </div>
+        }
       />
 
       <Panel title="Groups" copy={`${groups.data?.total ?? items.length} groups`}>
@@ -84,29 +89,38 @@ export function GroupsRoute() {
           <button className="button secondary" type="button" onClick={() => changeFilter("pick")}>Pick</button>
           <button className="button secondary" type="button" onClick={() => changeFilter("stale")}>Stale</button>
           <button className="button secondary" type="button" onClick={() => changeFilter("ai_failed")}>AI Failed</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("queue:ai_failed")}>AI Failure Queue</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("queue:low_confidence")}>Low Confidence Queue</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("queue:merge_suggested")}>Merge Suggested</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("queue:best_missing")}>Best Missing</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("queue:singleton")}>Single Photo</button>
+          <button className="button secondary" type="button" onClick={() => changeFilter("queue:ai_review")}>AI Review</button>
         </div>
-        <div className="field-grid" style={{ marginBottom: 16 }}>
-          <div className="field">
-            <label htmlFor="merge-source-group">Merge Source</label>
-            <input id="merge-source-group" value={mergeSourceId} onChange={(event) => setMergeSourceId(event.target.value)} placeholder="group to merge" />
+        <details className="secondary-tool" style={{ marginBottom: 16 }}>
+          <summary>Manual Merge by ID</summary>
+          <div className="field-grid" style={{ marginTop: 12 }}>
+            <div className="field">
+              <label htmlFor="merge-source-group">Merge Source</label>
+              <input id="merge-source-group" value={mergeSourceId} onChange={(event) => setMergeSourceId(event.target.value)} placeholder="group to merge" />
+            </div>
+            <div className="field">
+              <label htmlFor="merge-target-group">Merge Target</label>
+              <input id="merge-target-group" value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)} placeholder="group to keep" />
+            </div>
+            <div className="field">
+              <label htmlFor="merge-action">Action</label>
+              <button
+                id="merge-action"
+                className="button warning"
+                type="button"
+                disabled={!mergeSourceId.trim() || !mergeTargetId.trim()}
+                onClick={() => mergeGroup.mutate({ groupId: mergeSourceId.trim(), targetGroupId: mergeTargetId.trim() })}
+              >
+                Merge Groups
+              </button>
+            </div>
           </div>
-          <div className="field">
-            <label htmlFor="merge-target-group">Merge Target</label>
-            <input id="merge-target-group" value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)} placeholder="group to keep" />
-          </div>
-          <div className="field">
-            <label htmlFor="merge-action">Action</label>
-            <button
-              id="merge-action"
-              className="button warning"
-              type="button"
-              disabled={!mergeSourceId.trim() || !mergeTargetId.trim()}
-              onClick={() => mergeGroup.mutate({ groupId: mergeSourceId.trim(), targetGroupId: mergeTargetId.trim() })}
-            >
-              Merge Groups
-            </button>
-          </div>
-        </div>
+        </details>
         <div className="group-list">
           {items.map((group) => <GroupCard key={group.id} group={group} />)}
         </div>
@@ -127,6 +141,7 @@ function groupFilterPayload(filter: string): Record<string, unknown> {
   if (filter === "pick") return { pick: true };
   if (filter === "stale") return { stale: true };
   if (filter === "ai_failed") return { evaluation_status: "ai_eval_failed" };
+  if (filter.startsWith("queue:")) return { review_queue: filter.split(":")[1] };
   return {};
 }
 

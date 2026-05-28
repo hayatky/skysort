@@ -1,8 +1,20 @@
-from skysort_api.domain.evaluation import SemanticMetrics, TechnicalMetrics, compute_technical_total, final_rating_from_scores, provisional_rating_from_technical
+from skysort_api.domain.evaluation import (
+    SemanticMetrics,
+    TechnicalMetrics,
+    compute_technical_total,
+    final_rating_from_scores,
+    provisional_rating_from_technical,
+    provisional_rating_from_technical_decision,
+)
 
 
 def test_provisional_rating_rejects_low_scores() -> None:
     assert provisional_rating_from_technical(12) == (None, "rejected")
+
+
+def test_provisional_rating_decision_rejects_high_risk_scores() -> None:
+    assert provisional_rating_from_technical_decision(84, reject_risk_score=82) == (None, "rejected")
+    assert provisional_rating_from_technical_decision(84, reject_risk_score=20) == (5, "normal")
 
 
 def test_technical_total_stays_bounded() -> None:

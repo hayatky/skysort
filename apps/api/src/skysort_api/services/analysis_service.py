@@ -6,6 +6,7 @@ import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar
 
@@ -15,14 +16,18 @@ from skysort_api.domain.evaluation import (
     compute_technical_total,
     final_rating_from_scores,
     provisional_rating_from_technical,
+    provisional_rating_from_technical_decision,
+    technical_candidate_quality,
+    technical_reject_risk,
 )
-from skysort_api.domain.grouping import PhotoCandidate, should_start_new_group
+from skysort_api.domain.grouping import PhotoCandidate, grouping_boundary_reason, max_group_similarity
 from skysort_api.infra.ai_client import AIResult, VisionLanguageModelClient, json_schema_response_format
 from skysort_api.infra.file_scan import build_source_signature
 from skysort_api.infra.image_tools import (
+    build_contact_sheet_data_url,
     build_data_url,
-    compute_similarity_seed,
     compute_technical_metrics,
+    compute_visual_features,
     ensure_preview_assets,
     extract_image_metadata,
 )
@@ -66,6 +71,10 @@ GROUP_COMPARE_RESPONSE_SCHEMA: dict[str, object] = {
     "properties": {
         "schema_version": {"type": "string"},
         "best_photo_id": {"type": "string"},
+        "keep_photo_ids": {"type": "array", "items": {"type": "string"}},
+        "reject_photo_ids": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "number"},
+        "reason_by_photo_id": {"type": "object"},
         "ranking": {
             "type": "array",
             "items": {
@@ -75,15 +84,17 @@ GROUP_COMPARE_RESPONSE_SCHEMA: dict[str, object] = {
                     "rank": {"type": "integer"},
                     "semantic_score": {"type": "number"},
                     "rarity_score": {"type": "number"},
+                    "confidence": {"type": "number"},
+                    "problem_tags": {"type": "array", "items": {"type": "string"}},
                     "reason": {"type": "string"},
                 },
-                "required": ["photo_id", "rank", "semantic_score", "rarity_score", "reason"],
+                "required": ["photo_id", "rank", "semantic_score", "rarity_score", "confidence", "problem_tags", "reason"],
                 "additionalProperties": False,
             },
         },
         "drop_candidates": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["schema_version", "best_photo_id", "ranking", "drop_candidates"],
+    "required": ["schema_version", "best_photo_id", "keep_photo_ids", "reject_photo_ids", "confidence", "ranking", "reason_by_photo_id"],
     "additionalProperties": False,
 }
 
@@ -112,6 +123,7 @@ class GroupCompareResult:
     best_photo_id: str | None
     ranking_by_photo_id: dict[str, dict[str, object]]
     drop_candidates: set[str]
+    keep_candidates: set[str]
 
 
 @dataclass(slots=True)
@@ -130,6 +142,7 @@ class PhotoPreparationResult:
     preview_path: str
     metadata: dict[str, object]
     similarity_seed: float
+    visual_features: dict[str, object]
 
 
 @dataclass(slots=True)
@@ -231,6 +244,7 @@ def run_analysis(session, job_id: str, cancel_requested: Callable[[], bool] | No
                             capture_timestamp_ms=photo.capture_timestamp_ms,
                             capture_order_index=photo.capture_order_index,
                             similarity_seed=result.similarity_seed,
+                            visual_features=result.visual_features,
                         ),
                     )
                 )
@@ -296,6 +310,11 @@ def run_analysis(session, job_id: str, cancel_requested: Callable[[], bool] | No
                 _refresh_progress_counts(job, eval_repo)
                 job.updated_at = datetime.now(timezone.utc)
                 session.commit()
+
+        _apply_group_relative_technical_scores(eval_repo, job, groups, members_by_group_id)
+        _refresh_progress_counts(job, eval_repo)
+        job.updated_at = datetime.now(timezone.utc)
+        session.commit()
 
         _raise_if_cancel_requested(session, job, cancel_requested)
         job.current_stage = "semantically_scored"
@@ -491,18 +510,21 @@ def _prepare_photo_from_task(task: PhotoPreparationTask) -> PhotoPreparationResu
         metadata = task.cached_metadata if task.reuse_cached_metadata and task.cached_metadata is not None else extract_image_metadata(file_path)
     except Exception as exc:
         raise MetadataExtractionError(str(exc)) from exc
+    visual_features = compute_visual_features(file_path)
     return PhotoPreparationResult(
         photo_id=task.photo_id,
         thumb_path=str(thumb_path),
         preview_path=str(preview_path),
         metadata=metadata,
-        similarity_seed=compute_similarity_seed(file_path),
+        similarity_seed=int(str(visual_features["phash"])[:4], 16) / 65535.0,
+        visual_features=visual_features,
     )
 
 
 def _apply_photo_preparation_result(photo: Photo, result: PhotoPreparationResult) -> None:
     photo.thumb_path = result.thumb_path
     photo.preview_path = result.preview_path
+    photo.visual_features_json = json.dumps(result.visual_features)
     metadata = result.metadata
     photo.width = metadata["width"]
     photo.height = metadata["height"]
@@ -555,15 +577,27 @@ def _group_candidates(job_id: str, candidate_records: list[tuple[Photo, PhotoCan
     groups: list[Group] = []
     members: list[GroupMember] = []
     current_members: list[tuple[Photo, PhotoCandidate]] = []
-    previous: PhotoCandidate | None = None
+    boundary_reason = "job_start"
+    built_records: list[tuple[Group, list[tuple[Photo, PhotoCandidate]]]] = []
     for photo, candidate in candidate_records:
-        if should_start_new_group(previous, candidate, settings.time_proximity_seconds, settings.similarity_threshold) and current_members:
-            groups.append(_build_group(job_id, current_members, members))
+        reason = grouping_boundary_reason(
+            [item[1] for item in current_members],
+            candidate,
+            settings.time_proximity_seconds,
+            settings.similarity_threshold,
+        )
+        if reason is not None and current_members:
+            group = _build_group(job_id, current_members, members, boundary_reason=boundary_reason)
+            groups.append(group)
+            built_records.append((group, current_members))
             current_members = []
+            boundary_reason = reason
         current_members.append((photo, candidate))
-        previous = candidate
     if current_members:
-        groups.append(_build_group(job_id, current_members, members))
+        group = _build_group(job_id, current_members, members, boundary_reason=boundary_reason)
+        groups.append(group)
+        built_records.append((group, current_members))
+    _mark_merge_suggestions(built_records, settings.time_proximity_seconds, settings.similarity_threshold)
     return groups, members
 
 
@@ -598,6 +632,8 @@ def _apply_technical_score_result(
             highlight_clip_ratio=metrics.highlight_clip_ratio,
             shadow_clip_ratio=metrics.shadow_clip_ratio,
             technical_score_total=total,
+            candidate_quality_score=total,
+            reject_risk_score=_absolute_reject_risk(metrics, total),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
@@ -610,7 +646,7 @@ def _apply_technical_score_result(
             job_id=job_id,
             group_id=current.group_id if current else None,
             current=current,
-            semantic=SemanticMetrics(),
+            semantic=_semantic_from_current(current),
             rating=current.rating if current and current.user_override_flag else provisional_rating,
             selection_status=current.selection_status if current and current.user_override_flag else provisional_selection,
             evaluation_status="provisional",
@@ -623,6 +659,157 @@ def _apply_technical_score_result(
     )
     _record_history(eval_repo, current, photo.id, job_id, provisional_rating, provisional_selection, "technical_refresh")
     session.flush()
+
+
+def _apply_group_relative_technical_scores(
+    eval_repo: EvaluationRepository,
+    job: Job,
+    groups: list[Group],
+    members_by_group_id: dict[str, list[GroupMember]],
+) -> None:
+    for group in groups:
+        group_members = members_by_group_id.get(group.id, [])
+        scored = [
+            (member, score)
+            for member in group_members
+            if (score := eval_repo.technical_for_photo(member.photo_id, job.id)) is not None
+        ]
+        if not scored:
+            continue
+        sharpness_ranks = _rank_percentiles({member.photo_id: score.sharpness_score for member, score in scored})
+        exposure_ranks = _rank_percentiles({member.photo_id: _exposure_health(score) for member, score in scored})
+        for member, score in scored:
+            sharpness_rank = sharpness_ranks[member.photo_id]
+            exposure_rank = exposure_ranks[member.photo_id]
+            score.sharpness_rank = sharpness_rank
+            score.exposure_rank = exposure_rank
+            score.candidate_quality_score = _candidate_quality(score, sharpness_rank, exposure_rank)
+            score.reject_risk_score = _reject_risk(score, sharpness_rank)
+            score.updated_at = datetime.now(timezone.utc)
+            _refresh_provisional_from_technical(eval_repo, job.id, group.id, member.photo_id, score)
+
+
+def _refresh_provisional_from_technical(
+    eval_repo: EvaluationRepository,
+    job_id: str,
+    group_id: str,
+    photo_id: str,
+    score: TechnicalScore,
+) -> None:
+    current = eval_repo.current_for_photo(photo_id, job_id)
+    provisional_rating, provisional_selection = _provisional_from_technical_score(score)
+    eval_repo.add_evaluation(
+        _build_evaluation(
+            photo_id=photo_id,
+            job_id=job_id,
+            group_id=group_id,
+            current=current,
+            semantic=SemanticMetrics(
+                semantic_score=current.semantic_score if current else None,
+                composition_score=current.composition_score if current else None,
+                subject_state_score=current.subject_state_score if current else None,
+                rarity_score=current.rarity_score if current else None,
+                confidence_score=current.ai_confidence_score if current else None,
+                problem_tags=_json_list(current.problem_tags_json) if current else None,
+                reason=current.ai_reason if current else None,
+            ),
+            rating=current.rating if current and current.user_override_flag else provisional_rating,
+            selection_status=current.selection_status if current and current.user_override_flag else provisional_selection,
+            evaluation_status="provisional",
+            provisional_rating=provisional_rating,
+            provisional_selection_status=provisional_selection,
+            best_cut_flag=current.best_cut_flag if current else False,
+            pick_flag=current.pick_flag if current and current.user_override_flag else False,
+            reviewed_flag=current.reviewed_flag if current else False,
+        )
+    )
+    _record_history(eval_repo, current, photo_id, job_id, provisional_rating, provisional_selection, "technical_relative_refresh")
+
+
+def _rank_percentiles(values_by_photo_id: dict[str, float]) -> dict[str, float]:
+    if not values_by_photo_id:
+        return {}
+    if len(values_by_photo_id) == 1:
+        return {next(iter(values_by_photo_id)): 100.0}
+    ordered = sorted(values_by_photo_id.items(), key=lambda item: item[1])
+    denominator = len(ordered) - 1
+    return {
+        photo_id: round((index / denominator) * 100.0, 2)
+        for index, (photo_id, _value) in enumerate(ordered)
+    }
+
+
+def _candidate_quality(score: TechnicalScore, sharpness_rank: float, exposure_rank: float) -> float:
+    return technical_candidate_quality(
+        score.technical_score_total,
+        sharpness_rank,
+        exposure_rank,
+        score.motion_blur_score,
+    )
+
+
+def _reject_risk(score: TechnicalScore, sharpness_rank: float) -> float:
+    return technical_reject_risk(
+        score.highlight_clip_ratio,
+        score.shadow_clip_ratio,
+        score.motion_blur_score,
+        sharpness_rank,
+    )
+
+
+def _absolute_reject_risk(metrics: TechnicalMetrics, total: float) -> float:
+    exposure_risk = min(100.0, (metrics.highlight_clip_ratio * 180.0) + (metrics.shadow_clip_ratio * 140.0))
+    blur_risk = max(0.0, 100.0 - metrics.motion_blur_score)
+    total_risk = max(0.0, 100.0 - total)
+    return round((exposure_risk * 0.35) + (blur_risk * 0.35) + (total_risk * 0.30), 2)
+
+
+def _exposure_health(score: TechnicalScore) -> float:
+    return max(0.0, 100.0 - (score.highlight_clip_ratio * 180.0) - (score.shadow_clip_ratio * 140.0))
+
+
+def _technical_decision_score(score: TechnicalScore | None) -> float:
+    if score is None:
+        return 0.0
+    return score.candidate_quality_score if score.candidate_quality_score is not None else score.technical_score_total
+
+
+def _obvious_reject(score: TechnicalScore | None, reject_threshold: float) -> bool:
+    if score is None:
+        return True
+    if score.reject_risk_score is not None and score.reject_risk_score >= 88.0:
+        return True
+    return _technical_decision_score(score) < max(10.0, reject_threshold * 0.5)
+
+
+def _json_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in parsed if isinstance(item, str)] if isinstance(parsed, list) else []
+
+
+def _semantic_from_current(current: PhotoEvaluation | None) -> SemanticMetrics:
+    return SemanticMetrics(
+        semantic_score=current.semantic_score if current else None,
+        composition_score=current.composition_score if current else None,
+        subject_state_score=current.subject_state_score if current else None,
+        rarity_score=current.rarity_score if current else None,
+        confidence_score=current.ai_confidence_score if current else None,
+        problem_tags=_json_list(current.problem_tags_json) if current else None,
+        reason=current.ai_reason if current else None,
+    )
+
+
+def _provisional_from_technical_score(score: TechnicalScore) -> tuple[int | None, str]:
+    return provisional_rating_from_technical_decision(
+        _technical_decision_score(score),
+        reject_risk_score=score.reject_risk_score,
+        thresholds=_threshold_map(),
+    )
 
 
 def _evaluate_group(
@@ -647,6 +834,9 @@ def _evaluate_group(
         reject_threshold=_threshold_map()["reject"],
         candidate_limit=settings.candidate_limit,
     )
+    if group.merge_suggested:
+        _mark_merge_suggested_group_for_review(eval_repo, job, group, current_evaluations, ordered_ids)
+        return
     if settings.ai_concurrency <= 1:
         semantic_results = {
             photo_id: _evaluate_single_photo(eval_repo, photo_repo.get(photo_id), group.id, technical_scores[photo_id], ai_client)
@@ -694,13 +884,14 @@ def _evaluate_group(
 
     for photo_id in photo_ids:
         current = current_evaluations.get(photo_id)
-        technical_total = technical_scores[photo_id].technical_score_total if technical_scores[photo_id] else 0.0
+        technical_total = _technical_decision_score(technical_scores[photo_id])
         semantic = semantic_results.get(photo_id)
         if semantic is None:
             rating = current.rating if current else None
             selection_status = current.selection_status if current else "normal"
             evaluation_status = current.evaluation_status if current else "provisional"
-            semantic = SemanticMetrics(reason=current.ai_reason if current else None, ai_failed=evaluation_status == "ai_eval_failed")
+            semantic = _semantic_from_current(current)
+            semantic.ai_failed = evaluation_status == "ai_eval_failed"
         else:
             rating, selection_status, evaluation_status = final_rating_from_scores(
                 technical_total,
@@ -739,10 +930,10 @@ def _evaluate_group(
             rating = current.rating
             selection_status = current.selection_status
             pick_flag = current.pick_flag
-            best_cut_flag = current.best_cut_flag
+            best_cut_flag = current.best_cut_flag and photo_id == chosen_best
             reviewed_flag = current.reviewed_flag
         else:
-            pick_flag = bool(rating is not None and rating >= 4)
+            pick_flag = bool(photo_id in compare_result.keep_candidates or (rating is not None and rating >= 4))
             best_cut_flag = photo_id == chosen_best and selection_status != "rejected"
             reviewed_flag = current.reviewed_flag if current else False
         evaluation = _build_evaluation(
@@ -764,6 +955,49 @@ def _evaluate_group(
         _record_history(eval_repo, current, photo_id, job.id, rating, selection_status, "analysis_refresh")
     if chosen_best is None and photo_ids:
         _record_failure(session, job, failure_repo, "semantically_scored", "Unable to select best photo", group=group, retryable=True, reason_code="json_parse_failed")
+
+
+def _mark_merge_suggested_group_for_review(
+    eval_repo: EvaluationRepository,
+    job: Job,
+    group: Group,
+    current_evaluations: dict[str, PhotoEvaluation | None],
+    ordered_ids: list[str],
+) -> None:
+    group.best_photo_id = None
+    group.stale_flag = True
+    group.stale_reason = "merge_suggested"
+    group.updated_at = datetime.now(timezone.utc)
+    for photo_id in ordered_ids:
+        current = current_evaluations.get(photo_id)
+        semantic = _semantic_from_current(current)
+        evaluation = _build_evaluation(
+            photo_id=photo_id,
+            job_id=job.id,
+            group_id=group.id,
+            current=current,
+            semantic=semantic,
+            rating=current.rating if current else None,
+            selection_status=current.selection_status if current else "normal",
+            evaluation_status=current.evaluation_status if current else "provisional",
+            provisional_rating=current.provisional_rating if current else None,
+            provisional_selection_status=current.provisional_selection_status if current else "normal",
+            best_cut_flag=False,
+            pick_flag=current.pick_flag if current else False,
+            reviewed_flag=current.reviewed_flag if current else False,
+        )
+        evaluation.stale_flag = True
+        evaluation.stale_reason = "merge_suggested"
+        eval_repo.add_evaluation(evaluation)
+        _record_history(
+            eval_repo,
+            current,
+            photo_id,
+            job.id,
+            evaluation.rating,
+            evaluation.selection_status,
+            "merge_suggested_review",
+        )
 
 
 def _evaluate_single_photo(
@@ -789,16 +1023,18 @@ def _build_single_photo_ai_task(
     if photo is None:
         return None
     prompt, prompt_hash = load_prompt("single_image_v1")
+    settings = get_settings()
     content = prompt.replace("{{ photo_id }}", photo.id).replace("{{ technical_score_total }}", str(technical.technical_score_total if technical else 0)).replace("{{ capture_time }}", photo.capture_time.isoformat() if photo.capture_time else "")
     payload = {
-        "model": get_settings().ai_model_name,
+        "model": settings.ai_model_name,
+        "max_tokens": settings.ai_max_tokens,
         "response_format": json_schema_response_format("single_image_review", SINGLE_IMAGE_RESPONSE_SCHEMA),
         "messages": [
             {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": content},
-                    {"type": "image_url", "image_url": {"url": build_data_url(Path(photo.preview_path or photo.file_path), get_settings().preview_size)}},
+                    {"type": "image_url", "image_url": {"url": build_data_url(Path(photo.preview_path or photo.file_path), settings.preview_size)}},
                 ],
             }
         ],
@@ -826,6 +1062,8 @@ def _execute_single_photo_ai_task(
         composition_score=ranking.get("composition_score"),
         subject_state_score=ranking.get("subject_state_score"),
         rarity_score=ranking.get("rarity_score"),
+        confidence_score=ranking.get("confidence"),
+        problem_tags=ranking.get("problem_tags") if isinstance(ranking.get("problem_tags"), list) else None,
         reason=ranking.get("reason"),
         ai_failed=response.parsed_json is None,
     )
@@ -855,13 +1093,13 @@ def _select_ai_candidate_pool(
 ) -> tuple[list[str], list[str], list[str]]:
     ordered_ids = sorted(
         photo_ids,
-        key=lambda photo_id: (technical_scores[photo_id].technical_score_total if technical_scores[photo_id] else 0.0),
+        key=lambda photo_id: _technical_decision_score(technical_scores[photo_id]),
         reverse=True,
     )
     candidate_pool = [
         photo_id
         for photo_id in ordered_ids
-        if (technical_scores[photo_id].technical_score_total if technical_scores[photo_id] else 0.0) >= reject_threshold
+        if not _obvious_reject(technical_scores[photo_id], reject_threshold)
     ]
     if not candidate_pool:
         candidate_pool = ordered_ids[:1]
@@ -877,27 +1115,45 @@ def _choose_best_photo(
 ) -> GroupCompareResult:
     contenders = list(photo_ids)
     if not contenders:
-        return GroupCompareResult(best_photo_id=None, ranking_by_photo_id={}, drop_candidates=set())
+        return GroupCompareResult(best_photo_id=None, ranking_by_photo_id={}, drop_candidates=set(), keep_candidates=set())
 
     ranking_by_photo_id: dict[str, dict[str, object]] = {}
     drop_candidates: set[str] = set()
+    keep_candidates: set[str] = set()
     while len(contenders) > 6:
         winners: list[str] = []
-        for index in range(0, len(contenders), 6):
-            chunk = contenders[index : index + 6]
+        for chunk in _overlapping_compare_windows(contenders):
             result = _compare_chunk(eval_repo, photo_repo, group_id, chunk, ai_client)
             _merge_group_compare_payloads(ranking_by_photo_id, result.ranking_by_photo_id)
             drop_candidates.update(result.drop_candidates)
+            keep_candidates.update(result.keep_candidates)
             winners.append(result.best_photo_id or chunk[0])
-        contenders = list(dict.fromkeys(winners))
+        contenders = list(dict.fromkeys([*winners, *contenders[: min(3, len(contenders))]]))[:6]
     result = _compare_chunk(eval_repo, photo_repo, group_id, contenders, ai_client)
     _merge_group_compare_payloads(ranking_by_photo_id, result.ranking_by_photo_id)
     drop_candidates.update(result.drop_candidates)
+    keep_candidates.update(result.keep_candidates)
     return GroupCompareResult(
         best_photo_id=result.best_photo_id or contenders[0],
         ranking_by_photo_id=ranking_by_photo_id,
         drop_candidates=drop_candidates,
+        keep_candidates=keep_candidates,
     )
+
+
+def _overlapping_compare_windows(photo_ids: list[str], window_size: int = 6, overlap: int = 2) -> list[list[str]]:
+    if len(photo_ids) <= window_size:
+        return [photo_ids]
+    stride = max(1, window_size - overlap)
+    windows = [
+        photo_ids[index : index + window_size]
+        for index in range(0, len(photo_ids), stride)
+        if index + window_size <= len(photo_ids)
+    ]
+    last_window = photo_ids[-window_size:]
+    if not windows or windows[-1] != last_window:
+        windows.append(last_window)
+    return windows
 
 
 def _compare_chunk(
@@ -908,19 +1164,29 @@ def _compare_chunk(
     ai_client: VisionLanguageModelClient,
 ) -> GroupCompareResult:
     prompt, prompt_hash = load_prompt("group_compare_v1")
-    content = [{"type": "text", "text": prompt.replace("{{ candidate_photo_ids }}", ", ".join(photo_ids))}]
+    settings = get_settings()
+    sheet_items: list[tuple[str, Path]] = []
     for photo_id in photo_ids:
         photo = photo_repo.get(photo_id)
         if photo is None:
             continue
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": build_data_url(Path(photo.preview_path or photo.file_path), get_settings().compare_preview_size)},
-            }
-        )
+        sheet_items.append((photo_id, Path(photo.preview_path or photo.file_path)))
+    contact_sheet_url, label_map = build_contact_sheet_data_url(
+        sheet_items,
+        settings.compare_preview_size,
+        settings.preview_jpeg_quality,
+    )
+    label_map_text = "\n".join(f"{label}: {photo_id}" for label, photo_id in label_map.items())
+    content = [
+        {
+            "type": "text",
+            "text": prompt.replace("{{ candidate_photo_ids }}", ", ".join(photo_ids)).replace("{{ label_photo_id_map }}", label_map_text),
+        },
+        {"type": "image_url", "image_url": {"url": contact_sheet_url}},
+    ]
     payload = {
-        "model": get_settings().ai_model_name,
+        "model": settings.ai_model_name,
+        "max_tokens": settings.ai_max_tokens,
         "response_format": json_schema_response_format("group_compare_review", GROUP_COMPARE_RESPONSE_SCHEMA),
         "messages": [{"role": "user", "content": content}],
     }
@@ -941,7 +1207,7 @@ def _compare_chunk(
                 photo_ids,
             )
     if response.parsed_json is None:
-        return GroupCompareResult(best_photo_id=None, ranking_by_photo_id={}, drop_candidates=set())
+        return GroupCompareResult(best_photo_id=None, ranking_by_photo_id={}, drop_candidates=set(), keep_candidates=set())
 
     ranking_by_photo_id = {}
     for item in response.parsed_json.get("ranking", []):
@@ -953,13 +1219,21 @@ def _compare_chunk(
         ranking_by_photo_id[str(photo_id)] = {
             "semantic_score": item.get("semantic_score"),
             "rarity_score": item.get("rarity_score"),
+            "confidence": item.get("confidence"),
+            "problem_tags": item.get("problem_tags"),
             "reason": item.get("reason"),
             "rank": item.get("rank"),
         }
 
+    reject_ids = response.parsed_json.get("reject_photo_ids", response.parsed_json.get("drop_candidates", []))
     drop_candidates = {
         str(photo_id)
-        for photo_id in response.parsed_json.get("drop_candidates", [])
+        for photo_id in reject_ids
+        if str(photo_id) in photo_ids
+    }
+    keep_candidates = {
+        str(photo_id)
+        for photo_id in response.parsed_json.get("keep_photo_ids", [])
         if str(photo_id) in photo_ids
     }
     best_photo_id = response.parsed_json.get("best_photo_id")
@@ -967,19 +1241,162 @@ def _compare_chunk(
         best_photo_id=str(best_photo_id) if best_photo_id else None,
         ranking_by_photo_id=ranking_by_photo_id,
         drop_candidates=drop_candidates,
+        keep_candidates=keep_candidates,
     )
 
 
 def _validate_ai_response(response, phase: str, photo_ids: list[str]):
-    payload = response.parsed_json
-    if payload is None:
+    if response.parsed_json is None:
         return response
-    valid = _validate_single_payload(payload, photo_ids) if phase == "single" else _validate_group_compare_payload(payload, photo_ids)
-    if valid:
+    normalized = normalize_and_validate_ai_payload(phase, response.parsed_json, photo_ids)
+    if normalized is not None:
+        response.parsed_json = normalized
         return response
     response.parsed_json = None
     response.status = "ai_eval_failed"
     return response
+
+
+def normalize_and_validate_ai_payload(phase: str, payload: dict[str, object] | None, photo_ids: list[str]) -> dict[str, object] | None:
+    if payload is None or not _validate_common_ai_payload(payload):
+        return None
+    normalized = _normalize_single_payload(payload, photo_ids) if phase == "single" else _normalize_group_compare_payload(payload, photo_ids)
+    if normalized is None:
+        return None
+    valid = _validate_single_payload(normalized, photo_ids) if phase == "single" else _validate_group_compare_payload(normalized, photo_ids)
+    return normalized if valid else None
+
+
+def _normalize_single_payload(payload: dict[str, object], photo_ids: list[str]) -> dict[str, object] | None:
+    expected_ids = set(photo_ids)
+    ranking = payload.get("ranking")
+    if not isinstance(ranking, list) or not ranking:
+        return dict(payload)
+    normalized_items = []
+    for item in ranking:
+        if not isinstance(item, dict):
+            normalized_items.append(item)
+            continue
+        normalized_item = dict(item)
+        photo_id = _coerce_photo_id(normalized_item.get("photo_id"), photo_ids)
+        if photo_id is not None:
+            normalized_item["photo_id"] = photo_id
+        elif len(expected_ids) == 1:
+            normalized_item["photo_id"] = photo_ids[0]
+        normalized_items.append(normalized_item)
+    if len(expected_ids) == 1 and len(normalized_items) > 1:
+        ranked_items = [item for item in normalized_items if isinstance(item, dict) and item.get("photo_id") == photo_ids[0]]
+        if len(ranked_items) == len(normalized_items):
+            normalized_items = [max(ranked_items, key=_single_ranking_quality)]
+    normalized = dict(payload)
+    normalized["ranking"] = normalized_items
+    return normalized
+
+
+def _normalize_group_compare_payload(payload: dict[str, object], photo_ids: list[str]) -> dict[str, object] | None:
+    expected_ids = set(photo_ids)
+    normalized = dict(payload)
+    ranking = payload.get("ranking")
+    if isinstance(ranking, list):
+        normalized_ranking = []
+        for item in ranking:
+            if not isinstance(item, dict):
+                normalized_ranking.append(item)
+                continue
+            normalized_item = dict(item)
+            photo_id = _coerce_photo_id(normalized_item.get("photo_id"), photo_ids)
+            if photo_id is not None:
+                normalized_item["photo_id"] = photo_id
+            normalized_ranking.append(normalized_item)
+        normalized["ranking"] = normalized_ranking
+
+    best_photo_id = _coerce_photo_id(normalized.get("best_photo_id"), photo_ids)
+    if best_photo_id is not None:
+        normalized["best_photo_id"] = best_photo_id
+        ranking_items = normalized.get("ranking")
+        if isinstance(ranking_items, list) and not any(isinstance(item, dict) and item.get("photo_id") == best_photo_id for item in ranking_items):
+            rank_one_items = [item for item in ranking_items if isinstance(item, dict) and item.get("rank") == 1]
+            if len(rank_one_items) == 1 and _coerce_photo_id(rank_one_items[0].get("photo_id"), photo_ids) is None:
+                rank_one_items[0]["photo_id"] = best_photo_id
+        if isinstance(ranking_items, list):
+            valid_ranking_ids = {item.get("photo_id") for item in ranking_items if isinstance(item, dict) and item.get("photo_id") in expected_ids}
+            invalid_ranking_items = [item for item in ranking_items if isinstance(item, dict) and item.get("photo_id") not in expected_ids]
+            missing_ranking_ids = [photo_id for photo_id in photo_ids if photo_id not in valid_ranking_ids]
+            if len(invalid_ranking_items) == 1 and len(missing_ranking_ids) == 1:
+                invalid_ranking_items[0]["photo_id"] = missing_ranking_ids[0]
+    if "confidence" not in normalized or not _is_number(normalized.get("confidence")):
+        normalized["confidence"] = 0.0
+    if not isinstance(normalized.get("keep_photo_ids"), list):
+        normalized["keep_photo_ids"] = [best_photo_id] if isinstance(best_photo_id, str) and best_photo_id in expected_ids else []
+    normalized["keep_photo_ids"] = _valid_photo_id_list(normalized.get("keep_photo_ids"), photo_ids)
+    reject_source = normalized.get("reject_photo_ids")
+    if not isinstance(reject_source, list):
+        reject_source = normalized.get("drop_candidates")
+    normalized["reject_photo_ids"] = _valid_photo_id_list(reject_source, photo_ids)
+    if isinstance(normalized.get("drop_candidates"), list):
+        normalized["drop_candidates"] = _valid_photo_id_list(normalized.get("drop_candidates"), photo_ids)
+
+    reason_by_photo_id = normalized.get("reason_by_photo_id")
+    if isinstance(reason_by_photo_id, dict):
+        reasons = {}
+        for photo_id, reason in reason_by_photo_id.items():
+            coerced_id = _coerce_photo_id(photo_id, photo_ids)
+            if coerced_id is not None and isinstance(reason, str):
+                reasons[coerced_id] = reason
+    else:
+        reasons = {}
+    for item in normalized.get("ranking", []) if isinstance(normalized.get("ranking"), list) else []:
+        if isinstance(item, dict) and isinstance(item.get("photo_id"), str) and item["photo_id"] in expected_ids and isinstance(item.get("reason"), str):
+            reasons.setdefault(str(item["photo_id"]), str(item["reason"]))
+    normalized["reason_by_photo_id"] = reasons
+    return normalized
+
+
+def _valid_photo_id_list(value: object, photo_ids: list[str]) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for value_item in value:
+        photo_id = _coerce_photo_id(value_item, photo_ids)
+        if photo_id is not None and photo_id not in result:
+            result.append(photo_id)
+    return result
+
+
+def _coerce_photo_id(value: object, photo_ids: list[str]) -> str | None:
+    if not isinstance(value, str):
+        return None
+    expected_ids = set(photo_ids)
+    if value in expected_ids:
+        return value
+    if len(value) == 1 and value.isalpha():
+        index = ord(value.upper()) - ord("A")
+        if 0 <= index < len(photo_ids):
+            return photo_ids[index]
+    for photo_id in photo_ids:
+        if photo_id in value:
+            return photo_id
+    compact_value = "".join(character for character in value.replace("photo_id_", "photo_") if character.isalnum() or character == "_")
+    if compact_value in expected_ids:
+        return compact_value
+    close_matches = [
+        (SequenceMatcher(None, compact_value, photo_id).ratio(), photo_id)
+        for photo_id in photo_ids
+        if compact_value.startswith(photo_id[:10]) or photo_id.startswith(compact_value[:10])
+    ]
+    if not close_matches:
+        return None
+    best_ratio, best_photo_id = max(close_matches, key=lambda item: item[0])
+    return best_photo_id if best_ratio >= 0.78 else None
+
+
+def _single_ranking_quality(item: dict[str, object]) -> float:
+    score = 0.0
+    for key in ("semantic_score", "composition_score", "subject_state_score", "rarity_score"):
+        value = item.get(key)
+        if _is_number(value):
+            score += float(value)
+    return score
 
 
 def _validate_common_ai_payload(payload: dict[str, object]) -> bool:
@@ -1002,13 +1419,26 @@ def _validate_group_compare_payload(payload: dict[str, object], photo_ids: list[
     best_photo_id = payload.get("best_photo_id")
     if not isinstance(best_photo_id, str) or best_photo_id not in expected_ids:
         return False
+    if not _is_number(payload.get("confidence")):
+        return False
+    keep_photo_ids = payload.get("keep_photo_ids")
+    if not isinstance(keep_photo_ids, list) or not all(isinstance(photo_id, str) and photo_id in expected_ids for photo_id in keep_photo_ids):
+        return False
+    reject_photo_ids = payload.get("reject_photo_ids")
+    if not isinstance(reject_photo_ids, list) or not all(isinstance(photo_id, str) and photo_id in expected_ids for photo_id in reject_photo_ids):
+        return False
+    reason_by_photo_id = payload.get("reason_by_photo_id")
+    if not isinstance(reason_by_photo_id, dict):
+        return False
+    if not all(isinstance(photo_id, str) and photo_id in expected_ids and isinstance(reason, str) for photo_id, reason in reason_by_photo_id.items()):
+        return False
     ranking = payload.get("ranking")
     if not isinstance(ranking, list) or not ranking:
         return False
     if not all(_validate_ranking_item(item, expected_ids, require_rank=True) for item in ranking):
         return False
     drop_candidates = payload.get("drop_candidates")
-    return isinstance(drop_candidates, list) and all(isinstance(photo_id, str) and photo_id in expected_ids for photo_id in drop_candidates)
+    return drop_candidates is None or (isinstance(drop_candidates, list) and all(isinstance(photo_id, str) and photo_id in expected_ids for photo_id in drop_candidates))
 
 
 def _validate_ranking_item(item: object, photo_ids: set[str], *, require_rank: bool) -> bool:
@@ -1027,6 +1457,12 @@ def _validate_ranking_item(item: object, photo_ids: set[str], *, require_rank: b
         return False
     if "rarity_score" in item and not _is_number(item.get("rarity_score")):
         return False
+    if "confidence" in item and not _is_number(item.get("confidence")):
+        return False
+    if "problem_tags" in item:
+        problem_tags = item.get("problem_tags")
+        if not isinstance(problem_tags, list) or not all(isinstance(tag, str) for tag in problem_tags):
+            return False
     return isinstance(item.get("reason"), str) and bool(item.get("reason"))
 
 
@@ -1040,6 +1476,10 @@ def _merge_group_compare_semantic(existing: SemanticMetrics | None, ranking: dic
         merged.semantic_score = float(ranking["semantic_score"])
     if ranking.get("rarity_score") is not None:
         merged.rarity_score = float(ranking["rarity_score"])
+    if ranking.get("confidence") is not None:
+        merged.confidence_score = float(ranking["confidence"])
+    if isinstance(ranking.get("problem_tags"), list):
+        merged.problem_tags = [str(tag) for tag in ranking["problem_tags"] if isinstance(tag, str)]
     if ranking.get("reason"):
         merged.reason = str(ranking["reason"])
     return merged
@@ -1151,8 +1591,60 @@ def _store_ai_response(
     )
 
 
-def _build_group(job_id: str, current_members: list[tuple[Photo, PhotoCandidate]], members: list[GroupMember]) -> Group:
+def _mark_merge_suggestions(
+    group_records: list[tuple[Group, list[tuple[Photo, PhotoCandidate]]]],
+    time_proximity_seconds: int,
+    similarity_threshold: float,
+) -> None:
+    if len(group_records) < 2:
+        return
+    for previous, current in zip(group_records, group_records[1:], strict=False):
+        previous_group, previous_members = previous
+        current_group, current_members = current
+        gap_seconds = _group_gap_seconds(previous_members, current_members)
+        if gap_seconds is None or gap_seconds > max(12, time_proximity_seconds * 2):
+            continue
+        if min(len(previous_members), len(current_members)) > 4:
+            continue
+        if not _metadata_compatible(previous_members[-1][0], current_members[0][0]):
+            continue
+        similarity = max_group_similarity([item[1] for item in previous_members], current_members[0][1])
+        if similarity < max(0.0, similarity_threshold - 0.1):
+            continue
+        current_group.merge_suggested = True
+        current_group.merge_suggestion_reason = f"adjacent_gap={gap_seconds:.3f}s;similarity={similarity:.3f};previous_group={previous_group.id}"
+
+
+def _group_gap_seconds(
+    previous_members: list[tuple[Photo, PhotoCandidate]],
+    current_members: list[tuple[Photo, PhotoCandidate]],
+) -> float | None:
+    previous_ts = previous_members[-1][1].capture_timestamp_ms
+    current_ts = current_members[0][1].capture_timestamp_ms
+    if previous_ts is None or current_ts is None:
+        return None
+    return max(0.0, (current_ts - previous_ts) / 1000.0)
+
+
+def _metadata_compatible(previous: Photo, current: Photo) -> bool:
+    if previous.camera_model and current.camera_model and previous.camera_model != current.camera_model:
+        return False
+    if previous.lens_model and current.lens_model and previous.lens_model != current.lens_model:
+        return False
+    if previous.focal_length is not None and current.focal_length is not None:
+        return abs(previous.focal_length - current.focal_length) <= max(5.0, previous.focal_length * 0.05)
+    return True
+
+
+def _build_group(
+    job_id: str,
+    current_members: list[tuple[Photo, PhotoCandidate]],
+    members: list[GroupMember],
+    *,
+    boundary_reason: str,
+) -> Group:
     group_id = f"group_{uuid.uuid4().hex[:10]}"
+    candidates = [candidate for _, candidate in current_members]
     for order, (photo, candidate) in enumerate(current_members):
         members.append(
             GroupMember(
@@ -1160,7 +1652,7 @@ def _build_group(job_id: str, current_members: list[tuple[Photo, PhotoCandidate]
                 group_id=group_id,
                 photo_id=photo.id,
                 sort_order=order,
-                similarity_score=1.0 - abs(candidate.similarity_seed - current_members[0][1].similarity_seed),
+                similarity_score=max_group_similarity(candidates[:order], candidate) if order else 1.0,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             )
@@ -1174,6 +1666,9 @@ def _build_group(job_id: str, current_members: list[tuple[Photo, PhotoCandidate]
         group_start_time=current_members[0][0].capture_time,
         group_end_time=current_members[-1][0].capture_time,
         diversity_score=None,
+        boundary_reason=boundary_reason,
+        merge_suggested=False,
+        merge_suggestion_reason=None,
         stale_flag=False,
         stale_reason=None,
         created_at=datetime.now(timezone.utc),
@@ -1206,6 +1701,8 @@ def _build_evaluation(
         composition_score=semantic.composition_score,
         subject_state_score=semantic.subject_state_score,
         rarity_score=semantic.rarity_score,
+        ai_confidence_score=semantic.confidence_score,
+        problem_tags_json=json.dumps(semantic.problem_tags or []),
         provisional_rating=provisional_rating,
         provisional_selection_status=provisional_selection_status,
         rating=rating,
@@ -1400,6 +1897,10 @@ def _reuse_technical_score(
             highlight_clip_ratio=previous_technical.highlight_clip_ratio,
             shadow_clip_ratio=previous_technical.shadow_clip_ratio,
             technical_score_total=previous_technical.technical_score_total,
+            sharpness_rank=previous_technical.sharpness_rank,
+            exposure_rank=previous_technical.exposure_rank,
+            candidate_quality_score=previous_technical.candidate_quality_score,
+            reject_risk_score=previous_technical.reject_risk_score,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
@@ -1547,6 +2048,8 @@ def _clone_group_evaluation(previous: PhotoEvaluation, photo_id: str, job_id: st
         best_cut_flag=previous.best_cut_flag,
         reviewed_flag=previous.reviewed_flag,
         ai_reason=previous.ai_reason,
+        ai_confidence_score=previous.ai_confidence_score,
+        problem_tags_json=previous.problem_tags_json,
         user_override_flag=previous.user_override_flag,
         stale_flag=False,
         stale_reason=None,

@@ -17,8 +17,11 @@ class PhotoResult:
     relative_path: str
     rating: int | None
     selection_status: str
+    evaluation_status: str
     pick_flag: bool
     best_cut_flag: bool
+    reviewed_flag: bool
+    user_override_flag: bool
 
 
 def load_results(path: Path, root: Path | None) -> list[PhotoResult]:
@@ -41,12 +44,15 @@ def compare_expectations(expectations_path: Path, results_path: Path, *, root: P
 
     comparisons = [_compare_group(group, results, by_relative_path) for group in groups if isinstance(group, dict)]
     mismatches = [item for item in comparisons if item["status"] != "matched"]
+    metrics = _benchmark_metrics(comparisons, results)
     return {
         "schema_version": "v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "human_verified": bool(expectations.get("human_verified")),
         "expected_group_count": len(groups),
         "matched_group_count": len(comparisons) - len(mismatches),
         "mismatch_count": len(mismatches),
+        "metrics": metrics,
         "comparisons": comparisons,
     }
 
@@ -72,8 +78,11 @@ def _photo_result(item: dict[str, Any], root: Path | None) -> PhotoResult:
         relative_path=relative_path,
         rating=int(item["rating"]) if item.get("rating") is not None else None,
         selection_status=str(item.get("selection_status") or "normal"),
+        evaluation_status=str(item.get("evaluation_status") or "provisional"),
         pick_flag=bool(item.get("pick_flag")),
         best_cut_flag=bool(item.get("best_cut_flag")),
+        reviewed_flag=bool(item.get("reviewed_flag")),
+        user_override_flag=bool(item.get("user_override_flag")),
     )
 
 
@@ -83,10 +92,12 @@ def _compare_group(group: dict[str, Any], results: list[PhotoResult], by_relativ
     expected_best = group.get("expected_best")
     expected_reject = set(_string_list(group.get("expected_reject")))
     expected_pick = set(_string_list(group.get("expected_pick")))
+    expected_paths = set(_string_list(group.get("match", {}).get("relative_paths") if isinstance(group.get("match"), dict) else []))
 
     actual_best = sorted(item.relative_path for item in matched if item.best_cut_flag)
     actual_reject = sorted(item.relative_path for item in matched if item.selection_status == "rejected")
     actual_pick = sorted(item.relative_path for item in matched if item.pick_flag)
+    grouping = _group_quality(expected_paths, results, by_relative_path)
 
     issues: list[str] = []
     if expected_best and expected_best not in actual_best:
@@ -99,6 +110,10 @@ def _compare_group(group: dict[str, Any], results: list[PhotoResult], by_relativ
         issues.append("reject_mismatch")
     if missing_pick or unexpected_pick:
         issues.append("pick_mismatch")
+    if grouping["overfragmented"]:
+        issues.append("group_overfragmented")
+    if grouping["overmerged"]:
+        issues.append("group_overmerged")
     if not matched:
         issues.append("group_not_found")
 
@@ -107,12 +122,17 @@ def _compare_group(group: dict[str, Any], results: list[PhotoResult], by_relativ
         "status": "matched" if not issues else "mismatch",
         "issues": issues,
         "expected_best": expected_best,
+        "expected_reject": sorted(expected_reject),
+        "expected_pick": sorted(expected_pick),
         "actual_best": actual_best,
         "missing_reject": missing_reject,
         "unexpected_reject": unexpected_reject,
         "missing_pick": missing_pick,
         "unexpected_pick": unexpected_pick,
         "matched_photo_count": len(matched),
+        "expected_photo_count": len(expected_paths),
+        "actual_group_ids": grouping["actual_group_ids"],
+        "extra_group_photos": grouping["extra_group_photos"],
     }
 
 
@@ -126,6 +146,71 @@ def _match_group(match: Any, results: list[PhotoResult], by_relative_path: dict[
     if relative_paths:
         return [by_relative_path[path] for path in relative_paths if path in by_relative_path]
     return []
+
+
+def _group_quality(expected_paths: set[str], results: list[PhotoResult], by_relative_path: dict[str, PhotoResult]) -> dict[str, Any]:
+    if not expected_paths:
+        return {"actual_group_ids": [], "extra_group_photos": [], "overfragmented": False, "overmerged": False}
+    expected_results = [by_relative_path[path] for path in expected_paths if path in by_relative_path]
+    actual_group_ids = sorted({item.group_id for item in expected_results if item.group_id})
+    extra_group_photos = sorted(
+        {
+            item.relative_path
+            for item in results
+            if item.group_id in actual_group_ids and item.relative_path not in expected_paths
+        }
+    )
+    return {
+        "actual_group_ids": actual_group_ids,
+        "extra_group_photos": extra_group_photos,
+        "overfragmented": len(actual_group_ids) > 1,
+        "overmerged": bool(extra_group_photos),
+    }
+
+
+def _benchmark_metrics(comparisons: list[dict[str, Any]], results: list[PhotoResult]) -> dict[str, Any]:
+    expected_best_count = len([item for item in comparisons if item.get("expected_best")])
+    best_match_count = len(
+        [
+            item
+            for item in comparisons
+            if item.get("expected_best") and item.get("expected_best") in set(item.get("actual_best", []))
+        ]
+    )
+    expected_reject_count = sum(len(_string_list(item.get("expected_reject"))) for item in comparisons)
+    missing_reject_count = sum(len(_string_list(item.get("missing_reject"))) for item in comparisons)
+    expected_pick_count = sum(len(_string_list(item.get("expected_pick"))) for item in comparisons)
+    missing_pick_count = sum(len(_string_list(item.get("missing_pick"))) for item in comparisons)
+    unexpected_pick_count = sum(len(_string_list(item.get("unexpected_pick"))) for item in comparisons)
+    matched_photo_count = sum(int(item.get("matched_photo_count") or 0) for item in comparisons)
+    ai_failed_count = len([item for item in results if item.evaluation_status == "ai_eval_failed"])
+    reviewed_count = len([item for item in results if item.reviewed_flag])
+    user_override_count = len([item for item in results if item.user_override_flag])
+    return {
+        "best_match_count": best_match_count,
+        "expected_best_count": expected_best_count,
+        "best_match_rate": _ratio(best_match_count, expected_best_count),
+        "reject_recall_count": expected_reject_count - missing_reject_count,
+        "expected_reject_count": expected_reject_count,
+        "reject_recall": _ratio(expected_reject_count - missing_reject_count, expected_reject_count),
+        "expected_pick_count": expected_pick_count,
+        "missing_pick_count": missing_pick_count,
+        "unexpected_pick_count": unexpected_pick_count,
+        "group_overfragmented_count": len([item for item in comparisons if "group_overfragmented" in item.get("issues", [])]),
+        "group_overmerged_count": len([item for item in comparisons if "group_overmerged" in item.get("issues", [])]),
+        "ai_failed_count": ai_failed_count,
+        "matched_photo_count": matched_photo_count,
+        "ai_failure_rate": _ratio(ai_failed_count, len(results)),
+        "reviewed_count": reviewed_count,
+        "user_override_count": user_override_count,
+        "review_operation_count": reviewed_count + user_override_count,
+    }
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, 4)
 
 
 def _string_list(value: Any) -> list[str]:
@@ -149,7 +234,23 @@ def _write_csv(report: dict[str, Any], path: Path) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["name", "status", "issues", "expected_best", "actual_best", "missing_reject", "unexpected_reject", "missing_pick", "unexpected_pick", "matched_photo_count"],
+            fieldnames=[
+                "name",
+                "status",
+                "issues",
+                "expected_best",
+                "actual_best",
+                "expected_reject",
+                "missing_reject",
+                "unexpected_reject",
+                "expected_pick",
+                "missing_pick",
+                "unexpected_pick",
+                "matched_photo_count",
+                "expected_photo_count",
+                "actual_group_ids",
+                "extra_group_photos",
+            ],
         )
         writer.writeheader()
         for item in report["comparisons"]:
@@ -164,12 +265,33 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         f"- matched_group_count: {report['matched_group_count']}",
         f"- mismatch_count: {report['mismatch_count']}",
         "",
-        "| group | status | issues | expected_best | actual_best |",
-        "|---|---|---|---|---|",
+        "## Metrics",
+        "",
     ]
+    metrics = report.get("metrics", {})
+    for key in [
+        "best_match_rate",
+        "reject_recall",
+        "missing_pick_count",
+        "unexpected_pick_count",
+        "group_overfragmented_count",
+        "group_overmerged_count",
+        "ai_failure_rate",
+        "review_operation_count",
+    ]:
+        lines.append(f"- {key}: {metrics.get(key)}")
+    lines.extend(
+        [
+            "",
+            "## Groups",
+            "",
+            "| group | status | issues | expected_best | actual_best | group_ids | extra_group_photos |",
+            "|---|---|---|---|---|---|---|",
+        ]
+    )
     for item in report["comparisons"]:
         lines.append(
-            f"| {item['name']} | {item['status']} | {', '.join(item['issues']) or '-'} | {item.get('expected_best') or '-'} | {', '.join(item['actual_best']) or '-'} |"
+            f"| {item['name']} | {item['status']} | {', '.join(item['issues']) or '-'} | {item.get('expected_best') or '-'} | {', '.join(item['actual_best']) or '-'} | {', '.join(item.get('actual_group_ids', [])) or '-'} | {', '.join(item.get('extra_group_photos', [])) or '-'} |"
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

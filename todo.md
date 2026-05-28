@@ -1,167 +1,274 @@
-# SkySort TODO
+# SkySort 実データテスト後の改善 TODO
 
-このファイルは、`docs/plan.md` と現状実装の差異のうち、Codex がこのリポジトリ内で実装・自動テスト追加・ドキュメント整備として進められる作業を整理したものです。
+約3,000枚規模の実データテストで確認された問題を、連写画像のグルーピング、AIによるベストカット選定、半自動レビューUIの実用性改善に向けてタスク化する。
 
-実データの準備、3,000 枚規模の実測、Windows 11 実機確認、写真の主観評価、実機 ExifTool による原本近傍ファイルへの検証など、人間の環境・判断・データ提供が必要なタスクは含めません。
+## 0. 現状分析メモ
 
-## 優先度の目安
+- 最新ジョブでは 2,846 枚が 903 グループに分割されている。
+- 平均グループサイズは 3.15 枚。
+- 1枚グループは 353 件。
+- 4枚以下のグループは 709/903 件で、グループ全体の約 78.5%。
+- 4枚以下のグループに含まれる写真は 1,289/2,846 枚で、写真全体の約 45.3%。
+- 隣接グループ間の時間差が 4 秒以内の境界が 676/902 件あり、時間的には同一連写に見えるのに分割されている可能性が高い。
+- 技術スコアは `technical_score_total` が 25.38 から 34.22 に集中し、中央値 30.84、90 パーセンタイル 32.08 で、星評価や候補選抜の材料として十分に差が出ていない。
+- AI評価は最新ジョブ時点で `semantically_scored=107/2846` に留まり、`json_parse_failed=54`、`ai_timeout=27` が出ている。
 
-- P0: テスト運用開始前に実装または自動検証できるようにすべきもの
-- P1: テスト運用中の信頼性・作業効率に直結する実装改善
-- P2: Phase 2 相当だが、早期に入れると検証が進めやすいもの
+## 1. P0: 計測と診断基盤
 
-## P0: 受入前に必要な差異解消
+- [x] ジョブ完了後にグルーピング品質レポートを生成する
+  - group 数
+  - 1枚 group 数
+  - 2から4枚 group 数
+  - 平均 group size
+  - group size 分布
+  - 隣接 group 間の時間差分布
+  - 時間差が閾値以内なのに分割された境界数
+  - 分割理由が time gap か similarity gap かの内訳
+- [x] `scripts/grouping_validate.py` を DB の実ジョブから直接 fixture を生成できるように拡張する
+- [x] `time_proximity_seconds` と `similarity_threshold` のスイープ結果を比較できるレポートを追加する
+- [x] 技術スコア分布レポートを生成する
+  - sharpness
+  - motion_blur
+  - highlight/shadow clip
+  - total score
+  - group 内順位
+- [x] AI評価レポートを生成する
+  - phase 別成功/失敗数
+  - json parse failure 数
+  - timeout 数
+  - ai_eval_failed 数
+  - group_compare 成功率
+  - single 評価成功率
+- [x] 実データ検証時に `var/tmp` へ Markdown/JSON で診断結果を出力する
 
-### API 契約
+受入条件:
 
-- [x] `GET /api/groups` に `filter`、`sort`、`pagination` を実装する。
-  - `docs/plan.md` の API-006 は大量件数前提で絞り込み・並び替え・ページングを想定している。
-  - 現状は `job_id` のみで全件返却するため、件数増加時に UI/API ともに重くなりやすい。
-- [x] `POST /api/export/results` の `filters` を実装する。
-  - 現状はスキーマに `filters` があるが、実装では実質未使用。
-  - reject、pick、best_cut、reviewed、rating、evaluation_status などで絞り込めるようにする。
-- [x] `POST /api/export/xmp` の対象条件と `conflict_policy` を厳密化する。
-  - `photo_ids` 以外に、rating/reject/pick/best/reviewed などの条件指定を扱えるようにする。
-  - `conflict_policy` は `skip`、`fail`、`overwrite_safe_fields` の列挙値として API バリデーションする。
-  - `fail` 指定時に競合検出後の応答と書き込み停止が明確になるようにする。
+- [x] 2,000枚以上の既存ジョブに対して、写真本体を再解析せず DB から診断レポートを生成できる
+- [x] 閾値変更前後の group 数、1枚 group 数、平均 group size を比較できる
 
-### AI 応答と監査
+## 2. P0: グルーピングの過分割修正
 
-- [x] AI 応答 JSON の schema version を応答本文にも必須化し、保存時に検証する。
-  - 現状は DB 側に `response_schema_version` を保存しているが、AI が返した JSON 自体の schema version は必須検証していない。
-- [x] AI 応答の構造スキーマ検証を追加する。
-  - `best_photo_id`、`ranking[]`、`drop_candidates[]`、`photo_id`、`semantic_score`、`reason` などを型付きで検証する。
-  - 不正構造は `ai_eval_failed` として扱い、壊れた値で評価を確定しない。
-- [x] AI JSON 失敗時のリトライ状態をテストで明確にする。
-  - JSON ブロック抽出、最大2回再試行、`ai_eval_failed` 終端をそれぞれテストする。
-  - `response_status = succeeded / retried / ai_eval_failed` が監査テーブルに残ることを確認する。
+- [x] 現在の `similarity_seed` ベースの類似度判定を見直す
+  - 現状は pHash の先頭16bitを 0-1 に潰しており、航空機連写の類似判定として不安定
+  - full pHash の Hamming distance を保存・比較する
+  - dHash/aHash など複数の軽量視覚特徴を併用する
+  - 色ヒストグラム差分を追加する
+- [x] グルーピングを「前の1枚との比較」だけで切らない方式に変更する
+  - group 先頭との比較
+  - group 代表との比較
+  - 直近数枚の最大類似度
+  - 連写中の一時的な見た目変化で鎖が切れないようにする
+- [x] 初期グループは時間・撮影順を強く優先し、類似度は明らかな別シーン検出に使う方針へ変更する
+- [x] `time_proximity_seconds` の初期値を再検討する
+  - 現状 4 秒
+  - 実データ診断では 8 秒、12 秒程度も比較対象にする
+- [x] group 境界に `boundary_reason` を保存できるようにする
+  - `time_gap`
+  - `similarity_gap`
+  - `metadata_gap`
+  - `manual_split`
+- [x] 隣接グループの自動結合候補検出を追加する
+  - group 間時間差が短い
+  - camera/lens/focal_length が近い
+  - 代表画像同士が類似
+  - group size が小さい
+- [x] 自動結合候補を `merge_suggested` または stale reason として UI に出せるようにする
 
-### 再開性・状態管理
+受入条件:
 
-- [x] ジョブ中断後の再開方針を明確化する。
-  - 現状はキャッシュ再利用・前回ジョブ再利用はあるが、途中停止ジョブの本格 resume ではない。
-  - 実装方針として「新規ジョブとして再実行し、キャッシュを再利用する」か、途中ジョブの resume を実装するかを `docs/` に明記する。
-- [x] 入力ファイル更新・削除・設定変更時の stale 表示を強化する。
-  - 更新済みファイル、missing、設定変更により再評価が必要な項目を UI で確認できるようにする。
-  - stale 状態からの写真単位・グループ単位再解析導線を確認する。
-- [x] 合成画像を使った取り込み・再取り込みの自動テストを追加する。
-  - 新規追加、更新済み、削除済み、missing、キャッシュ再利用の判定をテストする。
-  - 大量実データではなく、生成可能な小規模 fixture で差分検出ロジックを確認する。
+- [x] 実データで 1枚 group 数と 4枚以下 group 数が大幅に減る
+- [ ] 明らかに別シーンの写真が不自然に結合されない
+  - `var/tmp/human-review-packet.md` に 20 burst の視覚確認対象を集約。machine benchmark では `group_overmerged_count=0` だが、`human_overmerge_ok` は未確認のため未完了。
+  - `scripts/human_review_packet.py --validate-packet` / `--apply-reviewed` を追加。全 group の `human_overmerge_ok=true` が揃うまで verified expectations を作れないようにした。
+  - `scripts/review_montages.py` と `var/tmp/human-review-montages/` を追加。review packet から各 group の montage path を辿れるため、人間が over-merge を確認しやすくなった。
+  - `var/tmp/human-review-packet.html` に montage 付きチェックフォームを出力し、JSON 直接編集なしで reviewed packet を作れるようにした。
+- [x] 隣接4秒以内で細切れになった group をレポートで特定できる
 
-### XMP 書き戻し安全性
+## 3. P0: 技術評価スコアの再校正
 
-- [x] ExifTool 呼び出しをモックし、ARW sidecar 書き戻しコマンドの自動テストを追加する。
-  - ARW 本体を直接変更せず、`.xmp` sidecar 出力指定になることを確認する。
-- [x] ExifTool 呼び出しをモックし、JPEG 埋め込み XMP 書き戻しコマンドの自動テストを追加する。
-  - JPEG のみ `-overwrite_original` を使うことを確認する。
-  - `dry_run=true` では書き込みコマンドが実行されないことを確認する。
-- [x] XMP 競合検出の自動テストを追加する。
-  - `inspect_existing_tags` をモックし、既存 `XMP:Rating`、`skysort:*` が異なる場合に `conflicts[]` へ出ることを確認する。
-  - `skip`、`fail`、`overwrite_safe_fields` の API 応答を確認する。
-- [x] PNG が XMP 書き戻し対象外であることを UI/API/テストで明確にする。
-- [x] パス処理の単体テストを追加する。
-  - 空白、日本語、相対パス、symlink 解決、存在しないパス、ディレクトリ以外のパスを確認する。
-  - Windows 実機確認は対象外とし、可能な範囲で `pathlib` ベースのロジックを自動テストする。
+- [x] `compute_technical_metrics` の sharpness/motion_blur スケールを見直す
+  - 現状は sharpness が 0から5 程度に潰れ、100点スケールとして機能していない
+- [x] 絶対スコアだけでなく group 内相対スコアを導入する
+  - group 内 sharpness rank
+  - group 内 exposure rank
+  - group 内 reject risk
+- [x] 中央固定領域だけでなく、航空機が存在しそうな高エッジ領域を優先して sharpness を計算する
+- [x] 露出破綻は白飛び/黒つぶれ率の単純減点だけでなく、航空機写真で許容される背景白飛びと被写体破綻を分ける方針を検討する
+- [x] 技術評価から直接★評価を決めるのではなく、暫定の `candidate_quality` と `reject_risk` を出す
+- [x] rating 閾値を実データ分布に合わせて再設計する
 
-## P1: テスト運用の信頼性向上
+受入条件:
 
-### ベンチマーク支援
+- [x] 同一連写内で、明らかにブレた写真とシャープな写真の順位差が出る
+- [x] 技術スコアが候補選抜に使える程度に分散する
+- [x] ほぼ全画像が★1相当になる状態を解消する
+  - `var/tmp/realdata-rescored-diagnostics.md` の非破壊 current-code rescore で、2,846枚の simulated current-code ratings が `star1_or_reject_rate=0.137` まで改善（旧 persisted job は `0.9986` のまま）
 
-- [x] ベンチマーク期待値ファイルのスキーマとテンプレートを追加する。
-  - group 名または相対パス単位で、期待 best/reject/pick を記録できる形式にする。
-  - 実データの選定や期待値入力は対象外とし、Codex はテンプレートと検証ロジックを用意する。
-- [x] ベンチマーク結果の差分レポート生成スクリプトを追加する。
-  - 期待値ファイルと API/export 結果を比較し、CSV/JSON/Markdown で差分を出力する。
-  - 実行ログやローカル生成物は `var/` 配下に置く。
+## 4. P0: AI比較入力とプロンプト改善
 
-### AI 評価品質
+- [x] group compare 用に contact sheet 生成を追加する
+  - 各画像に A/B/C などの視覚ラベルを焼き込む
+  - ラベルと photo_id の対応表をプロンプトに含める
+  - 画像順と JSON の ID 対応が崩れないようにする
+- [x] `group_compare_v1` を航空機連写比較向けに全面改訂する
+  - 機体切れ
+  - ピント/ブレ
+  - 構図
+  - 機体姿勢
+  - 背景や障害物
+  - 同一構図内で残す価値
+  - best と keep と reject の違い
+- [x] AI応答 schema を拡張する
+  - `best_photo_id`
+  - `keep_photo_ids`
+  - `reject_photo_ids`
+  - `ranking`
+  - `confidence`
+  - `problem_tags`
+  - `reason_by_photo_id`
+- [x] JSON parse failure を減らすため、schema とプロンプトの整合を再確認する
+- [x] timeout を実用値に見直す
+  - 現状 `ai_timeout_seconds=10.0`
+  - ローカルVLMの group compare では短すぎる可能性が高い
+- [x] AI評価失敗時に暫定評価のまま残すだけでなく、review queue で優先表示する
 
-- [x] 6枚超バーストの段階比較をモック AI で自動テストする。
-  - チャンクごとの winner 選出と最終比較が期待通りに呼ばれることを確認する。
-  - 中間比較の対象集合が `target_photo_ids_json` に残ることを確認する。
-- [x] AI 候補絞り込みの基準を設定・テストしやすくする。
-  - 現状は技術スコア順と reject 閾値を中心に候補化している。
-  - 候補選抜の境界条件を単体テストできるようにする。
-- [x] AI 応答失敗時もレビュー継続できることを自動テストする。
-  - `ai_eval_failed` の写真・グループが暫定評価のまま API レスポンスに残ることを確認する。
+受入条件:
 
-### 並列度と性能
+- [x] group compare の photo_id 取り違えが起きにくい
+- [x] JSON/schema failure 率が実データで低下する
+  - `var/tmp/realdata-rescored-diagnostics.md` の stored failed response replay で、current-code normalization 後の projected json/schema failure が `54/220 = 0.2455` から `30/220 = 0.1364` へ低下（24件を schema-valid として回復）
+  - current-payload probe `var/tmp/ai-timeout-probe-current-max-tokens.md` では、current prompt/schema/normalization と `ai_max_tokens=1024` で `json_schema_failure_rate=0.0`（0/10）まで低下。
+- [x] AIが best だけでなく keep/reject を区別して返せる
 
-- [x] `ai_concurrency` を実処理に反映する。
-  - 初期値は 1 のままでよいが、設定値が無視されないようにする。
-  - ローカル VLM の過負荷を避ける上限とキュー制御を入れる。
-- [x] `image_processing_concurrency` を実処理に反映する。
-  - プレビュー生成・メタデータ抽出・技術評価の並列度を AI 推論と分離する。
-  - SQLite トランザクションは短く保つ。
-- [x] 長時間ジョブの進捗粒度を改善する。
-  - 現在処理中ステージ、処理済み件数、失敗件数が大きな入力でも追いやすいようにする。
-  - 失敗一覧に photo/group ID、ファイル名、retryable を表示する。
+## 5. P1: AI評価フローの再設計
 
-### UI/UX
+- [x] 現在の「技術スコア上位を最大6枚比較」方式を見直す
+- [x] 連写 group 全体を対象に、明らかな失敗だけ事前除外し、候補は広めに残す
+- [x] 6枚超 group では非重複 chunk 勝者だけでなく、重複窓または上位候補再比較を行う
+- [x] group が細切れ疑いの場合、AI評価前に結合候補として扱う
+- [x] `best_cut` は group 内で1枚のみ維持し、複数 keep/pick と明確に分ける
+- [x] AI信頼度が低い group は自動確定せず review priority を上げる
+- [x] AI評価完了前でもレビューできるが、final と provisional の表示をより明確に分ける
 
-- [x] グループ一覧と全体レビューにページングまたは無限読み込みを導入する。
-  - API の pagination と合わせて実装する。
-- [x] review フィルタを API 側と揃える。
-  - 現状の UI 内フィルタだけでなく、API で絞り込んで返せるようにする。
-- [x] stale、missing、ai_eval_failed、conflict などの状態を UI で明確に表示する。
-- [x] XMP export 画面で dry-run 差分、blocked、conflicts を確認しやすくする。
-- [x] 設定変更後に「既存ジョブへは反映されず、新規解析ジョブで snapshot される」ことを UI で明示する。
+受入条件:
 
-### 開発運用
+- [x] 大きな連写 group でも best 候補が chunk 境界に依存しない
+- [x] 細切れ group に対して AI が局所最適な best を量産しない
+- [x] AI未完了/失敗/低信頼が UI で明確に区別される
 
-- [x] `apps/web/src` の `.ts/.tsx` と追跡済み `.js` 並存を整理する。
-  - `pnpm --filter @skysort/web build` により追跡済み `.js` が再生成され、差分が出る。
-  - TS を正本にして `.js` を生成物扱いにするか、追跡を続けるなら生成手順を明確化する。
-- [x] frontend build/typecheck の副作用が出ない構成にする。
-  - `noEmit`、`outDir`、`tsbuildinfo` などを確認する。
-- [x] 受入チェックリストを `docs/` に追加する。
-  - backend tests、frontend tests、OpenAPI generation、benchmark diff、XMP dry-run の自動確認を含める。
-  - Windows 実機確認や実データ負荷試験など、人間が実施する項目はこの TODO ではなく別の運用メモへ分離する。
+## 6. P1: Burst Review UI の新設
 
-## P2: Phase 2 相当だがテスト運用で早めに欲しい機能
+- [x] グループ単位レビューを主画面にした `Burst Review` 画面を追加する
+- [x] 1行1グループの横長サムネイルストリップを表示する
+  - AI best を強調
+  - keep/pick を強調
+  - reject 候補を暗転
+  - stale/AI failed/merge suggested を表示
+- [x] group size、撮影時間幅、隣接 group との時間差、AI confidence を同じ行で確認できるようにする
+- [x] ワンクリック操作を追加する
+  - Accept AI
+  - Set Best
+  - Keep Also
+  - Reject
+  - Mark Reviewed
+  - Merge Prev
+  - Merge Next
+  - Split Here
+- [x] キーボード操作を group review 向けに拡張する
+  - 上下: group 移動
+  - 左右: group 内 photo 移動
+  - Enter: AI判断を承認
+  - B: best 指定
+  - K/P: keep/pick
+  - X: reject
+  - M: 隣接結合
+  - S: split
+- [x] 現在の ID 手入力 merge UI を補助機能に下げ、隣接 group 操作を優先する
+- [x] 3,000枚規模で一覧性が落ちないよう仮想スクロールを使う
 
-### グループ修正
+受入条件:
 
-- [x] グループ結合 API を実装する。
-  - `POST /api/groups/{group_id}/merge`
-  - 結合後は関連評価を自動確定せず `stale` にする。
-- [x] グループ分割 API を実装する。
-  - `POST /api/groups/{group_id}/split`
-  - 分割後は best_cut を自動で安易に確定せず、再解析または手動確認へ誘導する。
-- [x] グループ結合・分割 UI を実装する。
-  - 操作前に dry-run 的な確認表示を出す。
-- [x] グループからの除外または単独グループ化を実装する。
-  - 明らかに別カットが混ざった場合の逃げ道として必要。
+- [x] AIが残す/ベストとした判断を group 単位で連続確認できる
+- [x] 細切れ group を UI 上で効率よく結合できる
+- [x] 1 group あたりのレビュー操作が数秒で完了できる
 
-### 検索・絞り込み
+## 7. P1: レビューキューとフィルタ改善
 
-- [x] 高速フィルタ・検索を実装する。
-  - rating、reject、pick、best_cut、reviewed、ai_eval_failed、stale、camera/lens、日付範囲、ファイル名。
-- [x] 削除候補レビュー専用ビューを強化する。
-  - reject と ★1 を混同しない。
-  - 削除候補としての確認・解除を高速に行えるようにする。
+- [x] レビュー対象を目的別 queue に分ける
+  - AI判断を確認
+  - 細切れ疑い
+  - 1枚 group
+  - AI失敗
+  - 低信頼
+  - reject候補
+  - best未確定
+  - stale
+- [x] group filter に以下を追加する
+  - [x] min/max group size
+  - [x] merge_suggested
+  - [x] best missing
+  - [x] ai confidence range
+  - [x] adjacent time gap range
+- [x] photo filter に以下を追加する
+  - [x] problem tag
+  - [x] keep/reject recommendation
+  - [x] user override only
+- [x] review progress を group 単位で表示する
+  - [x] reviewed groups
+  - [x] accepted AI groups
+  - [x] manually changed groups
+  - [x] unresolved groups
 
-### 再試行・再解析
+受入条件:
 
-- [x] 失敗項目の個別 retry UI/API を追加する。
-  - `retryable=true` の job failure から写真単位・グループ単位で再実行できるようにする。
-- [x] AI timeout、JSON parse failure、preview/exif failure を分けて再試行できるようにする。
-- [x] 再解析 scope の挙動を UI で選べるようにする。
-  - `technical_only`
-  - `ai_only`
-  - `full`
+- [x] 大量写真でも「次に確認すべきもの」が明確になる
+- [x] 1枚 group や細切れ疑いをまとめて処理できる
 
-### グルーピング精度
+## 8. P2: ベンチマークと受入基準
 
-- [x] embedding-based grouping の拡張点を実装または明確化する。
-  - 現状は撮影時刻と pHash 由来の簡易類似度が中心。
-  - テスト運用で誤グループが多い場合の改善先として用意する。
-- [x] グルーピング設定の検証ツールを作る。
-  - time proximity、similarity threshold を変えたときの group 数、単独 group 数、平均 group size を比較できるようにする。
+- [x] 実データから 10から20 個の代表 burst を選び、期待 best/reject/keep を `docs/benchmark-expectations.example.json` 互換形式で管理する
+  - `docs/benchmark-expectations.current-code-draft.json` に実データ由来 20 burst を管理。`var/tmp/realdata-rescored-diagnostics-fixture.json` の current-code technical score を使い、20/20 が expected_best/expected_pick、9/20 が expected_reject を持つ。主観 ground truth 化は別受入条件として未完了。
+- [x] 既存の `scripts/benchmark_diff.py` に group 品質評価を追加する
+- [x] ベンチマーク指標を定義する
+  - [x] best 一致率
+  - [x] reject 再現率
+  - [x] keep 過不足
+  - [x] group 過分割率
+  - [x] group 過結合率
+  - [x] AI失敗率
+  - [x] review 操作数
+- [x] 実データ再実行時の比較レポートを `var/tmp` に保存する
+- [x] README または docs に実データ検証手順を追記する
 
-## 継続確認項目
+受入条件:
 
-- [x] `docs/plan.md` と `README.md` の差異を定期的に確認する。
-- [x] API 変更時は `pnpm generate:client` を実行し、`packages/client/openapi.json` を更新する。
-- [x] 仕様変更を伴う実装では `AGENTS.md` の固定ルールが古くなっていないか確認する。
-- [x] ローカル完結、原本保護、remote AI opt-in、ARW 非破壊の方針を維持する。
+- [x] グルーピング変更、プロンプト変更、UI変更の効果を同じ指標で比較できる
+- [ ] 主観評価の改善を、最低限の期待セットで再現確認できる
+  - `var/tmp/human-review-packet.md` と `var/tmp/benchmark-expectations-current-code-draft.html` で確認対象を生成済み。`docs/benchmark-expectations.current-code-draft.json` は `human_verified=false` のため未完了。
+  - `var/tmp/human-review-montages/` の group 別 contact sheet を packet に紐づけ、expected_best/reject/pick の視覚確認を進めやすくした。
+  - HTML form から各 group の `human_subjective_ok` と notes を記録し、download した packet を validation/promotion に使える。
+  - `human_subjective_ok=true` が全 group で揃った packet だけを `docs/benchmark-expectations.verified.json` へ昇格できるようにした。
+
+## 9. 暫定運用メモ
+
+実装改修前に再テストする場合は、以下を診断目的で試す。ただし、現在の類似度実装自体が弱いため根本解決ではない。
+
+- [x] `similarity_threshold` を下げて過分割がどの程度減るか確認する
+- [x] `time_proximity_seconds` を 8 秒または 12 秒に広げて比較する
+- [x] `ai_timeout_seconds` を 60 秒以上に設定して AI timeout の減少を確認する
+  - 設定既定値は 60 秒へ変更済み。旧診断の timeout rate は `0.1227`。
+  - `scripts/ai_timeout_probe.py` を追加。stored request payload replay と current payload rebuild の両方で replayable sample を作り、LM Studio 起動時に `--execute` で timeout rate を測定できる。
+  - stale stored payload replay は `var/tmp/ai-timeout-probe.md` で `timeout_rate=0.2`（2/10）、120秒でも `var/tmp/ai-timeout-probe-120s.md` で `timeout_rate=0.2`（2/10）だった。
+  - current payload に `max_tokens=1024` を付け、`var/tmp/ai-timeout-probe-current-max-tokens.md` の 10 payload 実行で `timeout_rate=0.0`（0/10）と `json_schema_failure_rate=0.0`（0/10）を確認。旧診断 timeout `0.1227` より低下。
+- [x] AI評価完了前の暫定評価と最終評価を混同しないよう、レビュー対象を AI 完了済みに絞って確認する
+
+## 10. 実装順序案
+
+1. 診断レポートと閾値スイープを追加する
+2. グルーピング類似度を full hash / 複数特徴に置き換える
+3. 隣接 group の merge suggestion を追加する
+4. 技術スコアを group 内相対評価へ再校正する
+5. contact sheet と新 group compare prompt を追加する
+6. AI応答 schema を keep/reject/confidence/problem_tags 対応に拡張する
+7. Burst Review UI を追加する
+8. レビューキューと実データベンチマークを整備する

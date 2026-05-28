@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "@/components/layout";
+import { BurstReviewRoute } from "@/routes/burst-review-route";
 import { DeleteCandidatesRoute } from "@/routes/delete-candidates-route";
 import { ExportRoute } from "@/routes/export-route";
 import { GroupDetailRoute } from "@/routes/group-detail-route";
@@ -21,6 +22,7 @@ export function AppRouter() {
         <Route path="/groups" element={<GroupsRoute />} />
         <Route path="/groups/:groupId" element={<GroupDetailRoute />} />
         <Route path="/review" element={<ReviewRoute />} />
+        <Route path="/burst-review" element={<BurstReviewRoute />} />
         <Route path="/delete-candidates" element={<DeleteCandidatesRoute />} />
         <Route path="/export" element={<ExportRoute />} />
         <Route path="/settings" element={<SettingsRoute />} />

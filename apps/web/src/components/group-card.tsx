@@ -22,9 +22,17 @@ export function GroupCard({ group }: { group: GroupListItem }) {
         <span className="score-chip">Best {group.best_photo_id ?? "pending"}</span>
         <span className="score-chip">Tech {formatScore(group.technical_score_total)}</span>
         <span className="score-chip">AI {formatScore(group.semantic_score)}</span>
+        {group.ai_confidence_score != null ? <span className="score-chip">Conf {formatConfidence(group.ai_confidence_score)}</span> : null}
+        {group.review_queue && group.review_queue !== "reviewed" ? <span className="score-chip">{group.review_queue}</span> : null}
+        {group.boundary_reason ? <span className="score-chip">{group.boundary_reason}</span> : null}
+        {group.merge_suggested ? <span className="score-chip">Merge suggested</span> : null}
         {staleCount ? <span className="score-chip">Stale {staleCount}</span> : null}
         {failedCount ? <span className="score-chip">AI Failed {failedCount}</span> : null}
       </div>
     </Link>
   );
+}
+
+function formatConfidence(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }

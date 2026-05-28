@@ -1,6 +1,7 @@
 {
   "schema_version": "v1",
-  "description": "Copy this file and fill it with human-selected benchmark expectations. Paths are relative to the imported root when possible.",
+  "human_verified": false,
+  "description": "Copy this file and fill it with 10 to 20 human-selected representative bursts. Paths are relative to the imported root when possible. Include relative_paths for each expected burst so grouping over-fragment and over-merge metrics can be computed.",
   "groups": [
     {
       "name": "burst-001",
@@ -17,7 +18,8 @@
       ],
       "expected_pick": [
         "2026-03-26/DSC0002.jpg"
-      ]
+      ],
+      "notes": "Representative burst with one obvious reject and one clear best."
     }
   ]
 }

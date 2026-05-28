@@ -114,10 +114,17 @@ export interface AIHealthStatus {
 
 export interface ScoreSummary {
   technical_score_total?: number | null;
+  sharpness_rank?: number | null;
+  exposure_rank?: number | null;
+  candidate_quality_score?: number | null;
+  reject_risk_score?: number | null;
+  review_queue?: string;
+  review_priority?: number;
   semantic_score?: number | null;
   composition_score?: number | null;
   subject_state_score?: number | null;
   rarity_score?: number | null;
+  ai_confidence_score?: number | null;
 }
 
 export interface GroupListItem extends ScoreSummary {
@@ -127,12 +134,26 @@ export interface GroupListItem extends ScoreSummary {
   representative_thumb_url?: string | null;
   best_photo_id?: string | null;
   group_size: number;
+  group_start_time?: string | null;
+  group_end_time?: string | null;
+  previous_gap_seconds?: number | null;
+  boundary_reason?: string | null;
+  merge_suggested: boolean;
+  merge_suggestion_reason?: string | null;
   stale_flag: boolean;
   stale_reason?: string | null;
   reviewed_count: number;
   unreviewed_count: number;
   best_rating?: number | null;
   items?: PhotoReviewItem[];
+}
+
+export interface GroupReviewSummary {
+  total_groups: number;
+  reviewed_groups: number;
+  accepted_ai_groups: number;
+  manually_changed_groups: number;
+  unresolved_groups: number;
 }
 
 export interface PhotoReviewItem extends ScoreSummary {
@@ -153,6 +174,7 @@ export interface PhotoReviewItem extends ScoreSummary {
   selection_status: SelectionStatus;
   evaluation_status: EvaluationStatus;
   ai_reason?: string | null;
+  problem_tags?: string[];
   pick_flag: boolean;
   best_cut_flag: boolean;
   reviewed_flag: boolean;
@@ -171,6 +193,7 @@ export interface GroupListResponse {
   page: number;
   page_size: number;
   total_pages: number;
+  review_summary?: GroupReviewSummary;
 }
 
 export interface PhotoListResponse {
@@ -297,6 +320,8 @@ export interface SettingsResponse {
   ai_base_url: string;
   ai_model_name: string;
   allow_remote_ai: boolean;
+  ai_timeout_seconds: number;
+  ai_max_tokens: number;
   ai_concurrency: number;
   image_processing_concurrency: number;
   image_concurrency?: number;

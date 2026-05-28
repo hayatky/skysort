@@ -376,6 +376,19 @@ select {
   color: var(--ink);
 }
 
+.secondary-tool {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.secondary-tool summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .review-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
@@ -534,6 +547,97 @@ select {
   font-weight: 600;
 }
 
+.burst-layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) minmax(280px, 340px);
+  gap: 12px;
+  align-items: start;
+}
+
+.burst-list {
+  display: grid;
+  gap: 8px;
+}
+
+.burst-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.burst-row.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.burst-row header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.burst-strip {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.burst-thumb {
+  flex: 0 0 112px;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--ink);
+}
+
+.burst-thumb.active {
+  border-color: var(--accent);
+}
+
+.burst-thumb.rejected {
+  opacity: 0.48;
+}
+
+.burst-thumb img,
+.burst-thumb .review-thumb-placeholder {
+  width: 100%;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.burst-thumb span,
+.burst-thumb strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.burst-tools {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.burst-tools h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
 .rating-controls {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -649,7 +753,8 @@ select {
   .shell-grid,
   .hero,
   .review-layout,
-  .review-workspace {
+  .review-workspace,
+  .burst-layout {
     grid-template-columns: 1fr;
   }
 
@@ -662,7 +767,8 @@ select {
     height: auto;
   }
 
-  .review-preview {
+  .review-preview,
+  .burst-tools {
     position: static;
   }
 
@@ -683,5 +789,13 @@ select {
 
   .rating-controls {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .burst-row header {
+    display: grid;
+  }
+
+  .burst-thumb {
+    flex-basis: 96px;
   }
 }

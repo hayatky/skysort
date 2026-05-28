@@ -29,14 +29,21 @@ export function PhotoCard({
       <div className="score-row">
         <span className="score-chip">Tech {formatScore(photo.technical_score_total)}</span>
         <span className="score-chip">AI {formatScore(photo.semantic_score)}</span>
+        {photo.ai_confidence_score != null ? <span className="score-chip">Conf {formatConfidence(photo.ai_confidence_score)}</span> : null}
         {photo.is_missing ? <span className="score-chip">Missing</span> : null}
         {photo.stale_flag ? <span className="score-chip">Stale</span> : null}
         {photo.evaluation_status === "ai_eval_failed" ? <span className="score-chip">AI Failed</span> : null}
+        {photo.review_queue === "low_confidence" ? <span className="score-chip">Low Confidence</span> : null}
         {photo.provisional_rating ? <span className="score-chip">Provisional {photo.provisional_rating}</span> : null}
         {photo.best_cut_flag ? <span className="score-chip">Best Cut</span> : null}
         {photo.pick_flag ? <span className="score-chip">Pick</span> : null}
         {photo.reviewed_flag ? <span className="score-chip">Reviewed</span> : null}
+        {photo.problem_tags?.map((tag) => <span key={tag} className="score-chip">{tag}</span>)}
       </div>
     </button>
   );
+}
+
+function formatConfidence(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }

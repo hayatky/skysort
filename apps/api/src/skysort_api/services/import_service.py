@@ -208,6 +208,8 @@ def _settings_snapshot(settings, reuse_cache: bool) -> dict[str, object]:
         "ai_base_url": settings.ai_base_url,
         "ai_model_name": settings.ai_model_name,
         "allow_remote_ai": settings.allow_remote_ai,
+        "ai_timeout_seconds": settings.ai_timeout_seconds,
+        "ai_max_tokens": settings.ai_max_tokens,
         "ai_concurrency": settings.ai_concurrency,
         "image_processing_concurrency": settings.image_processing_concurrency,
         "thumbnail_size": settings.thumbnail_size,

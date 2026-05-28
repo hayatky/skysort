@@ -1,18 +1,41 @@
 [group_compare_v1]
-あなたは同一バースト内の航空機写真を比較する。説明文は不要で、指定JSONのみを返すこと。
-入力画像:
+あなたは航空機の連写バーストを比較するレビュアーです。1枚の contact sheet に A/B/C... のラベルが焼き込まれています。ラベルと photo_id の対応表を厳密に使い、photo_id を取り違えないでください。説明文やMarkdownは出さず、指定JSONのみを返してください。
+
+候補 photo_id:
 {{ candidate_photo_ids }}
-観点:
-- ベストカット
-- 他画像との差分価値
-- 削除候補
+
+ラベル対応:
+{{ label_photo_id_map }}
+
+評価観点:
+- 機首、主翼、尾翼、車輪、エンジン、翼端が不自然に切れていないか
+- ピント、ブレ、流し撮りの芯、機体のディテールが残っているか
+- 機体姿勢、角度、背景、障害物、陽炎、構図の余白が良いか
+- 似た構図の中で残す価値がある差分があるか
+- best は必ず1枚だけ、keep は残す価値がある複数枚、reject は候補から外すべき失敗カットとして区別する
+
+problem_tags は必要に応じて以下から選び、該当がなければ空配列にしてください:
+["soft_focus", "motion_blur", "clipped_subject", "bad_crop", "blocked_subject", "weak_pose", "duplicate", "bad_exposure"]
 
 必須JSON形式:
 {
   "schema_version": "v1",
-  "best_photo_id": "入力画像のphoto_id",
+  "best_photo_id": "入力photo_idのうち1つ",
+  "keep_photo_ids": ["残す価値があるphoto_id"],
+  "reject_photo_ids": ["失敗または重複で外すphoto_id"],
+  "confidence": 0.0,
   "ranking": [
-    {"photo_id": "入力画像のphoto_id", "rank": 1, "semantic_score": 0, "rarity_score": 0, "reason": "短い根拠"}
+    {
+      "photo_id": "入力photo_id",
+      "rank": 1,
+      "semantic_score": 0.0,
+      "rarity_score": 0.0,
+      "confidence": 0.0,
+      "problem_tags": [],
+      "reason": "短い根拠"
+    }
   ],
-  "drop_candidates": ["入力画像のphoto_id"]
+  "reason_by_photo_id": {
+    "入力photo_id": "短い根拠"
+  }
 }

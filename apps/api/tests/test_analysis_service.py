@@ -5,17 +5,19 @@ from datetime import datetime, timezone
 from threading import Lock
 
 from skysort_api.domain.grouping import PhotoCandidate
-from skysort_api.infra.models import Photo, TechnicalScore
+from skysort_api.infra.models import Group, GroupMember, Job, Photo, TechnicalScore
 from skysort_api.infra.settings import default_image_processing_concurrency
 from skysort_api.services.analysis_service import (
     MetadataExtractionError,
     PreviewGenerationError,
+    _apply_group_relative_technical_scores,
     _iter_with_concurrency,
     _map_with_concurrency,
     _reason_code_for_exception,
     _select_ai_candidate_pool,
     _sort_candidate_records,
 )
+from skysort_api.services.repositories import EvaluationRepository
 
 
 def _photo(photo_id: str, file_path: str, order: int) -> Photo:
@@ -68,7 +70,7 @@ def _technical(photo_id: str, total: float) -> TechnicalScore:
     )
 
 
-def test_select_ai_candidate_pool_applies_reject_threshold_and_candidate_limit() -> None:
+def test_select_ai_candidate_pool_keeps_broad_pool_and_applies_candidate_limit() -> None:
     scores = {
         "low": _technical("low", 19),
         "middle": _technical("middle", 55),
@@ -83,7 +85,7 @@ def test_select_ai_candidate_pool_applies_reject_threshold_and_candidate_limit()
     )
 
     assert ordered == ["high", "middle", "low"]
-    assert candidate_pool == ["high", "middle"]
+    assert candidate_pool == ["high", "middle", "low"]
     assert single_eval_ids == ["high"]
 
 
@@ -163,3 +165,78 @@ def test_default_image_processing_concurrency_scales_with_available_cpu(monkeypa
     monkeypatch.setattr("os.cpu_count", lambda: 32)
 
     assert default_image_processing_concurrency() == 16
+
+
+def test_group_relative_technical_scores_rank_candidates(db_session) -> None:
+    now = datetime.now(timezone.utc)
+    job = Job(
+        id="job_relative",
+        root_path="/tmp/relative",
+        status="running",
+        total_files=2,
+        current_stage="technically_scored",
+        error_messages_json="[]",
+        settings_snapshot_json="{}",
+        app_version="test",
+        model_name="test",
+        prompt_template_hash="hash",
+        response_schema_version="v1",
+    )
+    photos = [_photo("soft", "/tmp/soft.jpg", 0), _photo("sharp", "/tmp/sharp.jpg", 1)]
+    for photo in photos:
+        photo.job_id = job.id
+    group = Group(
+        id="group_relative",
+        job_id=job.id,
+        representative_photo_id="soft",
+        best_photo_id=None,
+        group_size=2,
+        group_start_time=now,
+        group_end_time=now,
+        created_at=now,
+        updated_at=now,
+    )
+    members = [
+        GroupMember(id="gm_soft", group_id=group.id, photo_id="soft", sort_order=0, similarity_score=1.0),
+        GroupMember(id="gm_sharp", group_id=group.id, photo_id="sharp", sort_order=1, similarity_score=1.0),
+    ]
+    scores = [
+        TechnicalScore(
+            id="tech_soft",
+            photo_id="soft",
+            job_id=job.id,
+            sharpness_score=20,
+            motion_blur_score=25,
+            highlight_clip_ratio=0.01,
+            shadow_clip_ratio=0.01,
+            technical_score_total=35,
+            created_at=now,
+            updated_at=now,
+        ),
+        TechnicalScore(
+            id="tech_sharp",
+            photo_id="sharp",
+            job_id=job.id,
+            sharpness_score=90,
+            motion_blur_score=85,
+            highlight_clip_ratio=0.0,
+            shadow_clip_ratio=0.0,
+            technical_score_total=85,
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    db_session.add_all([job, *photos, group, *members, *scores])
+    db_session.flush()
+
+    _apply_group_relative_technical_scores(EvaluationRepository(db_session), job, [group], {group.id: members})
+    soft = EvaluationRepository(db_session).technical_for_photo("soft", job.id)
+    sharp = EvaluationRepository(db_session).technical_for_photo("sharp", job.id)
+
+    assert soft and sharp
+    assert sharp.sharpness_rank == 100
+    assert soft.sharpness_rank == 0
+    assert sharp.candidate_quality_score and soft.candidate_quality_score
+    assert sharp.candidate_quality_score > soft.candidate_quality_score
+    assert sharp.reject_risk_score is not None and soft.reject_risk_score is not None
+    assert sharp.reject_risk_score < soft.reject_risk_score

@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Sidebar } from "@/components/sidebar";
+import { BurstReviewRoute } from "@/routes/burst-review-route";
 import { DeleteCandidatesRoute } from "@/routes/delete-candidates-route";
 import { ExportRoute } from "@/routes/export-route";
 import { GroupDetailRoute } from "@/routes/group-detail-route";
@@ -18,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   importJob: { isPending: false, error: null, mutateAsync: vi.fn() },
   progress: { data: { current_stage: "semantically_scored", status: "running", failed_files: 1, total_files: 10, imported_files: 10, grouped_files: 8, technically_scored_files: 7, semantically_scored_files: 3, provisional_rated_files: 5, final_rated_files: 2 } },
   failures: { data: { items: [{ id: "fail_1", stage: "preview_exif", reason_code: "metadata_extraction_failed", reason: "broken metadata", photo_id: "photo_1", group_id: null, file_name: "alpha.jpg", retryable: true, retry_scope: "full" }] } },
-  groups: { data: { items: [{ id: "group_1", group_size: 1, unreviewed_count: 1, stale_flag: true, items: [{ photo_id: "photo_1", selection_status: "normal", evaluation_status: "ai_eval_failed", pick_flag: false, stale_flag: true, is_missing: false }] }], total: 1, page: 1, page_size: 48, total_pages: 1 } },
+  groups: { data: { items: [{ id: "group_1", group_size: 1, group_start_time: "2026-01-01T00:00:00+00:00", group_end_time: "2026-01-01T00:00:02+00:00", previous_gap_seconds: 3, unreviewed_count: 1, review_queue: "ai_failed", ai_confidence_score: 0.42, stale_flag: true, items: [{ photo_id: "photo_1", file_name: "alpha.jpg", thumb_url: "/thumb.jpg", rating: 4, selection_status: "normal", evaluation_status: "ai_eval_failed", pick_flag: false, best_cut_flag: true, stale_flag: true, is_missing: false, semantic_score: 77 }] }], total: 1, page: 1, page_size: 48, total_pages: 1, review_summary: { total_groups: 1, reviewed_groups: 0, accepted_ai_groups: 0, manually_changed_groups: 0, unresolved_groups: 1 } } },
   group: { data: { id: "group_1", photos: [{ photo_id: "photo_1", file_name: "alpha.jpg", preview_url: "/preview.jpg", thumb_url: "/thumb.jpg", rating: 4, provisional_rating: 3, technical_score_total: 88, semantic_score: 77, evaluation_status: "ai_eval_failed", selection_status: "normal", ai_reason: "best angle", pick_flag: true, best_cut_flag: true, reviewed_flag: true, stale_flag: true, stale_reason: "settings_changed", is_missing: false }] } },
   photos: { data: { items: [{ photo_id: "photo_1", group_id: "group_1", file_name: "alpha.jpg", thumb_url: "/thumb.jpg", rating: 1, selection_status: "normal", evaluation_status: "ai_eval_failed", pick_flag: true, best_cut_flag: true, reviewed_flag: false, stale_flag: true, stale_reason: "settings_changed", is_missing: false, technical_score_total: 90, semantic_score: 92 }], total: 1 } },
   photoMutation: { mutate: vi.fn() },
@@ -31,7 +32,7 @@ const mocks = vi.hoisted(() => ({
   splitGroup: { mutate: vi.fn() },
   xmpExport: { mutate: vi.fn(), data: { target_count: 1, writable_count: 1, blocked_count: 0, conflict_count: 1, write_candidates: [{ photo_id: "photo_1", summary: "preview diff" }], conflicts: [{ photo_id: "photo_2", summary: "rating conflict", result_code: "conflict" }] } },
   resultsExport: { mutate: vi.fn(), data: { export_path: "/tmp/export.csv" } },
-  settings: { data: { ai_provider: "openrouter", ai_base_url: "https://openrouter.ai/api/v1", ai_model_name: "google/gemini-2.5-flash-lite", allow_remote_ai: true, ai_concurrency: 1, image_processing_concurrency: 2, similarity_threshold: 0.86, time_proximity_seconds: 4, candidate_limit: 6, thumbnail_size: 512, preview_size: 1024, compare_preview_size: 512, preview_jpeg_quality: 90, highlight_threshold: 252, shadow_threshold: 3, exiftool_path: "exiftool", cache_dir: "/tmp/cache", weights: { technical_quality: 0.35, composition: 0.35, subject_state: 0.2, rarity: 0.1 }, rating_thresholds: { star_5: 83, star_4: 78, star_3: 64, star_2: 48, reject: 20 } } },
+  settings: { data: { ai_provider: "openrouter", ai_base_url: "https://openrouter.ai/api/v1", ai_model_name: "google/gemini-2.5-flash-lite", allow_remote_ai: true, ai_timeout_seconds: 60, ai_max_tokens: 512, ai_concurrency: 1, image_processing_concurrency: 2, similarity_threshold: 0.86, time_proximity_seconds: 4, candidate_limit: 6, thumbnail_size: 512, preview_size: 1024, compare_preview_size: 512, preview_jpeg_quality: 90, highlight_threshold: 252, shadow_threshold: 3, exiftool_path: "exiftool", cache_dir: "/tmp/cache", weights: { technical_quality: 0.35, composition: 0.35, subject_state: 0.2, rarity: 0.1 }, rating_thresholds: { star_5: 83, star_4: 78, star_3: 64, star_2: 48, reject: 20 } } },
   updateSettings: { mutate: vi.fn() },
   projects: { data: { items: [{ project_id: "proj_1", id: "proj_1", name: "Haneda", root_path: "C:\\photos\\haneda", recursive: true, file_types: [".jpg"], last_job_id: "job_123", latest_job: { job_id: "job_123", project_id: "proj_1", root_path: "C:\\photos\\haneda", status: "running", total_files: 10, failed_files: 1, current_stage: "semantically_scored", active_stage_label: "AI analysis", percent: 30 } }], total: 1 } },
   startProjectAnalysis: { mutateAsync: vi.fn(), isPending: false },
@@ -91,6 +92,7 @@ vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: () => ({
     getTotalSize: () => 260,
     getVirtualItems: () => [{ index: 0, start: 0 }],
+    scrollToIndex: vi.fn(),
   }),
 }));
 
@@ -181,6 +183,11 @@ describe("route rendering", () => {
         <ReviewRoute />
       </MemoryRouter>,
     );
+    const burstMarkup = renderToStaticMarkup(
+      <MemoryRouter>
+        <BurstReviewRoute />
+      </MemoryRouter>,
+    );
     const exportMarkup = renderToStaticMarkup(
       <MemoryRouter>
         <ExportRoute />
@@ -194,6 +201,10 @@ describe("route rendering", () => {
     expect(reviewMarkup).toContain("Stale");
     expect(reviewMarkup).toContain("Missing");
     expect(reviewMarkup).toContain("AI Failed");
+    expect(burstMarkup).toContain("Burst Review");
+    expect(burstMarkup).toContain("Accept AI");
+    expect(burstMarkup).toContain("Unresolved 1");
+    expect(burstMarkup).toContain("alpha.jpg");
     expect(exportMarkup).toContain("Export");
     expect(exportMarkup).toContain("/tmp/export.csv");
     expect(exportMarkup).toContain("Conflict Policy");
@@ -222,6 +233,7 @@ describe("route rendering", () => {
     );
 
     expect(markup).toContain("/groups?job=job_123");
+    expect(markup).toContain("/burst-review?job=job_123");
     expect(markup).toContain("Haneda");
     expect(markup).toContain("/review?job=job_123");
     expect(markup).toContain("/delete-candidates?job=job_123");
